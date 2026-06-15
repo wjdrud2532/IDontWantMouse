@@ -20,6 +20,9 @@ config.font = wezterm.font_with_fallback {
 config.font_size = 13.0
 config.line_height = 1.05
 config.scrollback_lines = 10000
+-- 렌더 프레임레이트 ↑ → 주입된 OSC 색 변경이 더 빨리 그려짐(지연 한 프레임 감소).
+-- 색/동작은 그대로, 체감 지연만 약간 줄이는 용도. 거슬리면 이 줄 삭제.
+config.max_fps = 120
 config.window_background_opacity = 1.0  -- 완전 불투명 → 또렷한 단색 배경 (흐림 없음)
 config.macos_window_background_blur = 0  -- 블러 끔
 -- 전체화면을 macOS 네이티브 방식으로(별도 Space 생성 → Ctrl+방향키로 전환 가능)
