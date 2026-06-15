@@ -1,0 +1,15 @@
+// jkhan personal XKB keymap
+//   - 기본 한국어/영어 듀얼 레이아웃 (kr,us)
+//   - keypad:pointerkeys 옵션으로 Shift+NumLock MouseKeys 토글 활성
+//   - jkhan(main) symbols 가 caps/modifier/numpad 매핑을 덮어쓴다
+//
+// 적용:
+//   xkbcomp -I"$HOME/.xkb" "$HOME/.xkb/keymap/jkhan" "$DISPLAY"
+
+xkb_keymap {
+    xkb_keycodes  { include "evdev+aliases(qwerty)"                          };
+    xkb_types     { include "complete"                                       };
+    xkb_compat    { include "complete"                                       };
+    xkb_symbols   { include "pc+kr+us:2+inet(evdev)+keypad(pointerkeys)+jkhan(main)" };
+    xkb_geometry  { include "pc(pc105)"                                      };
+};

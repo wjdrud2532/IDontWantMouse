@@ -1,0 +1,57 @@
+// jkhan personal XKB symbols
+//   - caps -> Hangul (IBus 한영 트리거)
+//   - 좌측 modifier 3-cycle (Mac 식): LCTL→Super, LWIN→Alt, LALT→Ctrl
+//   - 우측 modifier:                   RALT→Ctrl, RCTL→Alt (RWIN 그대로)
+//   - 키패드 (NumLock OFF=네비/마우스, ON=숫자):
+//       0/. → XF86Back/Forward
+//       7/1 → Home/End
+//       9/3 → F13/F14 (xbindkeys 휠)
+//       /*- → Pointer_Button1/3/2
+//       5   → KP_Begin (PointerKeys 클릭)
+//       8/2/4/6 → KP_Up/Down/Left/Right (PointerKeys 이동)
+//
+// modifier_map 은 base 가 keycode 기반으로 잡아둔 매핑이 남아 LALT/RALT 가
+// Mod1 도 trigger 하는 문제가 있어 명시적으로 다시 매핑한다.
+
+default xkb_symbols "main" {
+
+    // ── Caps Lock → Hangul ──
+    replace key <CAPS> { [ Hangul ] };
+
+    // ── 좌측 modifier (Mac 식 3-cycle) ──
+    replace key <LCTL> { [ Super_L   ] };
+    replace key <LWIN> { [ Alt_L     ] };
+    replace key <LALT> { [ Control_L ] };
+
+    // ── 우측 modifier (Mac 식) ──
+    replace key <RALT> { [ Control_R ] };
+    replace key <RCTL> { [ Alt_R     ] };
+
+    // ── modifier_map 새로 잡기 ──
+    // base 의 modifier_map { Mod1: LALT/RALT, Control: LCTL/RCTL, Mod4: LWIN/RWIN }
+    // 가 keysym replace 와 따로 살아남으므로, 새 keysym 위치에 맞게 갱신한다.
+    modifier_map Mod4    { <LCTL>, <RWIN> };   // Super (cmd)
+    modifier_map Mod1    { <LWIN>, <RCTL> };   // Alt   (opt)
+    modifier_map Control { <LALT>, <RALT> };   // Control
+
+    // ── 키패드 ──
+    replace key  <KP0> { [ XF86Back,        KP_0        ] };
+    replace key <KPDL> { [ XF86Forward,     KP_Decimal  ] };
+
+    replace key  <KP7> { [ Home,            KP_7        ] };
+    replace key  <KP1> { [ End,             KP_1        ] };
+
+    replace key  <KP9> { [ F13,             KP_9        ] };
+    replace key  <KP3> { [ F14,             KP_3        ] };
+
+    replace key <KPDV> { [ Pointer_Button1, KP_Divide   ] };
+    replace key <KPMU> { [ Pointer_Button3, KP_Multiply ] };
+    replace key <KPSU> { [ Pointer_Button2, KP_Subtract ] };
+
+    replace key  <KP5> { [ KP_Begin,        KP_5        ] };
+
+    replace key  <KP8> { [ KP_Up,           KP_8        ] };
+    replace key  <KP2> { [ KP_Down,         KP_2        ] };
+    replace key  <KP4> { [ KP_Left,         KP_4        ] };
+    replace key  <KP6> { [ KP_Right,        KP_6        ] };
+};
