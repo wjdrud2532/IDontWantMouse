@@ -58,30 +58,37 @@ local INACTIVE_BG = '#1a1b26' -- 비활성 pane 배경 (검은 톤)
 
 local last_active = {} -- window_id -> 직전 활성 pane_id (불필요한 재주입 방지)
 
--- 활성 pane 만 초록, 나머지는 검정으로 배경 갱신. 변화 없으면 아무 일도 안 함.
-local function recolor_panes(window)
+-- active_id 인 pane 만 초록, 나머지는 검정으로 칠한다. 변화 없으면 아무 일도 안 함.
+local function paint(window, active_id)
   local tab = window:active_tab()
   if not tab then return end
-  local active = tab:active_pane()
-  if not active then return end
   local wid = window:window_id()
-  if last_active[wid] == active:pane_id() then return end
-  last_active[wid] = active:pane_id()
+  if last_active[wid] == active_id then return end
+  last_active[wid] = active_id
   for _, info in ipairs(tab:panes_with_info()) do
-    local bg = info.is_active and ACTIVE_BG or INACTIVE_BG
+    local bg = (info.pane:pane_id() == active_id) and ACTIVE_BG or INACTIVE_BG
     -- OSC 11 ; <color> BEL → 해당 pane 의 기본 배경색 설정
     pcall(function() info.pane:inject_output('\x1b]11;' .. bg .. '\x07') end)
   end
 end
 
--- pane 이동 + 즉시 색칠 → 폴링 지연 없이 키 누르는 즉시 반영(0ms).
--- perform_action 이 비동기여도 recolor_panes 의 가드 덕분에 안전:
---   - 새 pane 이 이미 반영됐으면 즉시 색칠(0ms)
---   - 아직이면 가드가 skip → 아래 backstop 이 곧 맞춰줌 (잘못 칠할 일 없음)
+-- 현재 활성 pane 을 읽어 칠한다 (backstop: 마우스 클릭·탭 전환·분할 등 키 이동 외 경로용)
+local function recolor_panes(window)
+  local tab = window:active_tab()
+  local active = tab and tab:active_pane()
+  if active then paint(window, active:pane_id()) end
+end
+
+-- pane 이동을 0ms 로: 목적지 pane 을 미리 알아내(get_pane_direction) 직접 활성화하고
+-- 그 pane 을 곧바로 칠한다. perform_action 의 비동기 지연을 우회하므로 즉시 반영된다.
+-- (get_pane_direction 은 ActivatePaneDirection 과 동일 로직 → 이동 결과와 색이 항상 일치)
 local function nav(direction)
   return wezterm.action_callback(function(window, pane)
-    window:perform_action(act.ActivatePaneDirection(direction), pane)
-    recolor_panes(window)
+    local tab = pane:tab()
+    local target = tab and tab:get_pane_direction(direction)
+    if not target then return end          -- 그 방향에 pane 없음 → 그대로 둠
+    target:activate()                      -- 포커스 이동
+    paint(window, target:pane_id())        -- 알아낸 목적지를 즉시 초록으로
   end)
 end
 
