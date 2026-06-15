@@ -13,6 +13,7 @@
 | `wezterm/wezterm.lua` | `~/.wezterm.lua` | 맥 (정본, 크로스플랫폼 공용) |
 | `wezterm/wezterm.linux-jkhan.lua` | `~/.wezterm.lua` | 리눅스 `jkhan` (스냅샷, 맥과 일부 다름) |
 | `macos-keyboard/karabiner.json` | `~/.config/karabiner/karabiner.json` | 맥 |
+| `macos-keyboard/homerow.plist` | `~/Library/Preferences/com.superultra.Homerow.plist` | 맥 (`defaults import` 로 복원) |
 | `linux-keyboard/xkb/keymap/jkhan` | `~/.xkb/keymap/jkhan` | 리눅스 `jkhan` |
 | `linux-keyboard/xkb/symbols/jkhan` | `~/.xkb/symbols/jkhan` | 리눅스 `jkhan` |
 | `linux-keyboard/etc-default-keyboard` | `/etc/default/keyboard` | 리눅스 `jkhan` (root, `sudo` 필요) |
@@ -23,6 +24,8 @@
 cp wezterm/wezterm.lua ~/.wezterm.lua
 # 맥 키보드 (Karabiner-Elements 가 자동 로드)
 cp macos-keyboard/karabiner.json ~/.config/karabiner/karabiner.json
+# 맥 Homerow (import 후 앱 재시작)
+defaults import com.superultra.Homerow macos-keyboard/homerow.plist
 # 리눅스 키보드 (jkhan 박스에서)
 mkdir -p ~/.xkb/keymap ~/.xkb/symbols
 cp linux-keyboard/xkb/keymap/jkhan  ~/.xkb/keymap/jkhan
@@ -45,6 +48,14 @@ sudo cp linux-keyboard/etc-default-keyboard /etc/default/keyboard
 - `5`·`/` = 좌클릭, `*` = 우클릭, `-` = 중간클릭
 - `7` = Home, `1` = End, `9/3` = 위/아래 스크롤
 - `0` = 뒤로(button4), `.` = 앞으로(button5)
+
+## Homerow (맥 — 키보드로 화면 클릭/스크롤, 마우스 대체)
+화면 위 클릭 가능한 요소에 라벨을 띄워 키보드로 클릭/스크롤. 현재 단축키:
+- `⌥/` (Option+/) = 검색 모드(search-shortcut)
+- `⌥Space` = 비검색 모드(non-search-shortcut)
+- `⇧⌘J` = 스크롤 모드(scroll-shortcut)
+- 자동 클릭 on, 로그인 시 자동 실행 on, 라벨 폰트 9pt.
+- 복원: `defaults import com.superultra.Homerow macos-keyboard/homerow.plist` 후 앱 재시작. (라이선스 키는 이 plist에 없음 — 별도 입력 필요)
 
 ## Linux 키보드 (XKB)
 - `~/.xkb/keymap/jkhan` + `~/.xkb/symbols/jkhan` 커스텀 키맵/심볼. `/etc/default/keyboard` 는 콘솔/X 레이아웃.

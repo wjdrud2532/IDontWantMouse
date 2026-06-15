@@ -9,6 +9,7 @@
 | `wezterm/wezterm.lua` | WezTerm 설정 (크로스플랫폼 공용, 맥 기준 최신). Leader(Ctrl+a) 기반 분할/이동, 포커스된 pane 초록 배경 표시, pane 이동 0ms 반영 등 | macOS `~/.wezterm.lua` |
 | `wezterm/wezterm.linux-jkhan.lua` | Linux(jkhan) 박스의 WezTerm 설정 스냅샷 (맥 버전과 일부 다름) | Linux `~/.wezterm.lua` |
 | `macos-keyboard/karabiner.json` | Karabiner-Elements 설정. 넘패드로 마우스 포인터 이동/클릭/스크롤/뒤로·앞으로 제어 | macOS `~/.config/karabiner/karabiner.json` |
+| `macos-keyboard/homerow.plist` | Homerow 설정. 키보드만으로 화면 요소 클릭/스크롤 (마우스 대체). 단축키·자동클릭 등 | macOS `~/Library/Preferences/com.superultra.Homerow.plist` |
 | `linux-keyboard/xkb/keymap/jkhan` | 커스텀 XKB keymap | Linux `~/.xkb/keymap/jkhan` |
 | `linux-keyboard/xkb/symbols/jkhan` | 커스텀 XKB symbols | Linux `~/.xkb/symbols/jkhan` |
 | `linux-keyboard/etc-default-keyboard` | 콘솔/X 키보드 레이아웃 | Linux `/etc/default/keyboard` |
@@ -23,6 +24,12 @@ cp wezterm/wezterm.lua ~/.wezterm.lua
 ### macOS — 키보드 (Karabiner-Elements)
 ```bash
 cp macos-keyboard/karabiner.json ~/.config/karabiner/karabiner.json
+```
+
+### macOS — Homerow
+```bash
+defaults import com.superultra.Homerow macos-keyboard/homerow.plist
+# 적용하려면 Homerow 앱 재시작
 ```
 
 ### Linux — 키보드 (XKB)

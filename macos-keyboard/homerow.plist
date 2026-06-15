@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUHasLaunchedBefore</key>
+	<true/>
+	<key>SULastCheckTime</key>
+	<date>2026-06-14T07:20:49Z</date>
+	<key>SUUpdateGroupIdentifier</key>
+	<integer>3059868760</integer>
+	<key>activation-count</key>
+	<integer>204</integer>
+	<key>enableSoundEffects</key>
+	<false/>
+	<key>hide-labels-when-nothing-is-searched</key>
+	<true/>
+	<key>is-auto-click-enabled</key>
+	<true/>
+	<key>label-characters</key>
+	<string></string>
+	<key>label-font-size</key>
+	<real>9</real>
+	<key>launch-at-login</key>
+	<true/>
+	<key>non-search-shortcut</key>
+	<string>⌥Space</string>
+	<key>scroll-shortcut</key>
+	<string>⇧⌘J</string>
+	<key>search-shortcut</key>
+	<string>⌥/</string>
+	<key>use-search-predicate</key>
+	<true/>
+</dict>
+</plist>
