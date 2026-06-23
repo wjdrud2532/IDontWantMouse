@@ -48,6 +48,7 @@ config.inactive_pane_hsb = {
 }
 
 -- 키 이벤트 로깅 (진단용). 필요할 때만 true 로.
+-- 포커스 폭주 원인 분석 완료 후 false 로 되돌림(켜두면 로그가 수십 MB 로 비대해짐).
 config.debug_key_events = false
 
 -- ┌──────────────────────────────────────────────┐
@@ -82,11 +83,47 @@ local function recolor_panes(window)
   if active then paint(window, active:pane_id()) end
 end
 
+-- ┌──────────────────────────────────────────────┐
+-- │ pane 이동 디바운스 (자동반복 폭주 방지)         │
+-- │ 증상: 아무 키도 안 눌렀는데 포커스가 모든 pane 을│
+-- │  초고속 순회 → 타이핑 불가. 원인은 화살표 계열   │
+-- │  키(특히 Ctrl+Shift+←/→ = macOS Spaces 단축키와  │
+-- │  충돌)가 stuck/ghost/반복 상태에 빠져 nav 가 매   │
+-- │  반복마다 호출되는 것. KeyRepeat 가 빠를수록 심함.│
+-- │ 대책: 사람이 누르는 간격(>RAPID_GAP)은 그대로    │
+-- │  통과. 그보다 빠른 연속 이동이 MAX_RAPID 회 이상  │
+-- │  쌓이면 폭주로 보고 차단. 간격이 다시 벌어지면    │
+-- │  (=멈추면) rapid_run 이 0 으로 리셋돼 자동 복구.  │
+-- └──────────────────────────────────────────────┘
+local RAPID_GAP = 0.15  -- (초) 이보다 짧은 연속 이동은 '의심스러운 연타'
+local MAX_RAPID = 6     -- 의심 연타가 이만큼 쌓이면 폭주로 간주해 차단
+local last_nav_t = 0
+local rapid_run  = 0
+
+-- 서브초 단위 wall-clock(초, float). %s.%f → tonumber 로 ms 이하까지 얻음.
+local function now_s()
+  return tonumber(wezterm.time.now():format('%s.%f')) or 0
+end
+
+-- 이번 pane 이동을 허용할지 판단. false = 폭주로 보고 차단.
+local function nav_allowed()
+  local t = now_s()
+  local gap = t - last_nav_t
+  last_nav_t = t
+  if gap < RAPID_GAP then
+    rapid_run = rapid_run + 1   -- 너무 빠른 연속 → 카운트 누적
+  else
+    rapid_run = 0               -- 사람 속도의 간격 → 정상으로 리셋
+  end
+  return rapid_run < MAX_RAPID
+end
+
 -- pane 이동을 0ms 로: 목적지 pane 을 미리 알아내(get_pane_direction) 직접 활성화하고
 -- 그 pane 을 곧바로 칠한다. perform_action 의 비동기 지연을 우회하므로 즉시 반영된다.
 -- (get_pane_direction 은 ActivatePaneDirection 과 동일 로직 → 이동 결과와 색이 항상 일치)
 local function nav(direction)
   return wezterm.action_callback(function(window, pane)
+    if not nav_allowed() then return end   -- 자동반복 폭주 차단 (사람 입력은 통과)
     local tab = pane:tab()
     local target = tab and tab:get_pane_direction(direction)
     if not target then return end          -- 그 방향에 pane 없음 → 그대로 둠
@@ -241,7 +278,7 @@ end)
 config.status_update_interval = 200 -- backstop 폴링 주기(ms). 키 이동은 nav()가 즉시 처리하므로 잦을 필요 없음
 
 wezterm.on('update-status', function(window)
-  recolor_panes(window)
+  recolor_panes(window) -- 키 이동 외(마우스 클릭·탭 전환·분할 등) 경로의 포커스 색 backstop
 end)
 
 return config
