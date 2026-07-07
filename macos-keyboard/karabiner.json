@@ -13,10 +13,7 @@
                                     "modifiers": { "mandatory": ["shift"], "optional": ["any"] }
                                 },
                                 "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [
-                                    { "set_variable": { "name": "mouse_mode", "value": 0 } },
-                                    { "set_notification_message": { "id": "mouse_mode", "text": "" } }
-                                ],
+                                "to": [{ "set_variable": { "name": "mouse_mode", "value": 0 } }],
                                 "type": "basic"
                             },
                             {
@@ -25,10 +22,7 @@
                                     "modifiers": { "mandatory": ["shift"], "optional": ["any"] }
                                 },
                                 "conditions": [{ "type": "variable_unless", "name": "mouse_mode", "value": 1 }],
-                                "to": [
-                                    { "set_variable": { "name": "mouse_mode", "value": 1 } },
-                                    { "set_notification_message": { "id": "mouse_mode", "text": "🖱 MOUSE MODE" } }
-                                ],
+                                "to": [{ "set_variable": { "name": "mouse_mode", "value": 1 } }],
                                 "type": "basic"
                             }
                         ]
