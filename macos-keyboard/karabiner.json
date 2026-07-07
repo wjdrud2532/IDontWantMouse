@@ -1,4 +1,5 @@
 {
+    "global": { "show_profile_name_in_menu_bar": true },
     "profiles": [
         {
             "complex_modifications": {
@@ -134,12 +135,52 @@
                                 "type": "basic"
                             }
                         ]
+                    },
+                    {
+                        "description": "Shift + NumLock → 프로파일 토글 (mouse ↔ defalut)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "keypad_num_lock",
+                                    "modifiers": {
+                                        "mandatory": ["shift"],
+                                        "optional": ["any"]
+                                    }
+                                },
+                                "to": [{ "shell_command": "current=\"$(/usr/bin/jq -r '.profiles[]|select(.selected==true).name' /Users/han/.config/karabiner/karabiner.json)\"; if [ \"$current\" = \"mouse\" ]; then P=defalut; else P=mouse; fi; '/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli' --select-profile \"$P\"" }],
+                                "type": "basic"
+                            }
+                        ]
                     }
                 ]
             },
-            "name": "Default profile",
+            "name": "mouse",
             "selected": true,
             "virtual_hid_keyboard": { "keyboard_type_v2": "ansi" }
+        },
+        {
+            "complex_modifications": {
+                "rules": [
+                    {
+                        "description": "Shift + NumLock → 프로파일 토글 (mouse ↔ defalut)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "keypad_num_lock",
+                                    "modifiers": {
+                                        "mandatory": ["shift"],
+                                        "optional": ["any"]
+                                    }
+                                },
+                                "to": [{ "shell_command": "current=\"$(/usr/bin/jq -r '.profiles[]|select(.selected==true).name' /Users/han/.config/karabiner/karabiner.json)\"; if [ \"$current\" = \"mouse\" ]; then P=defalut; else P=mouse; fi; '/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli' --select-profile \"$P\"" }],
+                                "type": "basic"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "name": "defalut",
+            "virtual_hid_keyboard": { "keyboard_type_v2": "jis" }
         }
     ]
 }
