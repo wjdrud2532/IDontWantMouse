@@ -425,15 +425,19 @@
                         ]
                     },
                     {
-                        "description": "Opt + Space + h/j/k/l → 단어(←/→) / 단락(↑/↓) 단위 이동",
+                        "description": "Caps Lock + Space + h/j/k/l → 단어(←/→) / 단락(↑/↓) 단위 이동",
                         "manipulators": [
                             {
+                                "conditions": [
+                                    {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "spacebar",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -465,6 +469,11 @@
                             {
                                 "conditions": [
                                     {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
                                         "name": "word_mode",
                                         "type": "variable_if",
                                         "value": 1
@@ -473,9 +482,6 @@
                                 "from": {
                                     "key_code": "h",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -494,6 +500,11 @@
                             {
                                 "conditions": [
                                     {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
                                         "name": "word_mode",
                                         "type": "variable_if",
                                         "value": 1
@@ -502,9 +513,6 @@
                                 "from": {
                                     "key_code": "j",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -523,6 +531,11 @@
                             {
                                 "conditions": [
                                     {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
                                         "name": "word_mode",
                                         "type": "variable_if",
                                         "value": 1
@@ -531,9 +544,6 @@
                                 "from": {
                                     "key_code": "k",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -552,6 +562,11 @@
                             {
                                 "conditions": [
                                     {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
                                         "name": "word_mode",
                                         "type": "variable_if",
                                         "value": 1
@@ -560,9 +575,6 @@
                                 "from": {
                                     "key_code": "l",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -581,7 +593,7 @@
                         ]
                     },
                     {
-                        "description": "Caps Lock + h/j/k/l → 마우스 포인터 이동 / +Opt: h,l = 좌·우 클릭, k,j = 위·아래 스크롤(numpad 9,3)",
+                        "description": "Caps Lock + h/j/k/l → 방향키 (←/↓/↑/→) / +Opt: h,l = 좌·우 클릭, k,j = 위·아래 스크롤",
                         "manipulators": [
                             {
                                 "from": {
@@ -595,7 +607,7 @@
                                 "to": [
                                     {
                                         "set_variable": {
-                                            "name": "mouse_layer",
+                                            "name": "caps_held",
                                             "value": 1
                                         }
                                     }
@@ -603,7 +615,7 @@
                                 "to_after_key_up": [
                                     {
                                         "set_variable": {
-                                            "name": "mouse_layer",
+                                            "name": "caps_held",
                                             "value": 0
                                         }
                                     }
@@ -627,7 +639,7 @@
                                 "to": [
                                     {
                                         "set_variable": {
-                                            "name": "mouse_layer",
+                                            "name": "caps_held",
                                             "value": 1
                                         }
                                     }
@@ -635,7 +647,7 @@
                                 "to_after_key_up": [
                                     {
                                         "set_variable": {
-                                            "name": "mouse_layer",
+                                            "name": "caps_held",
                                             "value": 0
                                         }
                                     }
@@ -650,7 +662,7 @@
                             {
                                 "conditions": [
                                     {
-                                        "name": "mouse_layer",
+                                        "name": "caps_held",
                                         "type": "variable_if",
                                         "value": 1
                                     }
@@ -676,7 +688,7 @@
                             {
                                 "conditions": [
                                     {
-                                        "name": "mouse_layer",
+                                        "name": "caps_held",
                                         "type": "variable_if",
                                         "value": 1
                                     }
@@ -702,7 +714,7 @@
                             {
                                 "conditions": [
                                     {
-                                        "name": "mouse_layer",
+                                        "name": "caps_held",
                                         "type": "variable_if",
                                         "value": 1
                                     }
@@ -730,7 +742,7 @@
                             {
                                 "conditions": [
                                     {
-                                        "name": "mouse_layer",
+                                        "name": "caps_held",
                                         "type": "variable_if",
                                         "value": 1
                                     }
@@ -758,7 +770,7 @@
                             {
                                 "conditions": [
                                     {
-                                        "name": "mouse_layer",
+                                        "name": "caps_held",
                                         "type": "variable_if",
                                         "value": 1
                                     }
@@ -766,107 +778,6 @@
                                 "from": {
                                     "key_code": "h",
                                     "modifiers": {
-                                        "optional": [
-                                            "any"
-                                        ]
-                                    }
-                                },
-                                "to": [
-                                    {
-                                        "mouse_key": {
-                                            "x": -1536
-                                        }
-                                    }
-                                ],
-                                "type": "basic"
-                            },
-                            {
-                                "conditions": [
-                                    {
-                                        "name": "mouse_layer",
-                                        "type": "variable_if",
-                                        "value": 1
-                                    }
-                                ],
-                                "from": {
-                                    "key_code": "j",
-                                    "modifiers": {
-                                        "optional": [
-                                            "any"
-                                        ]
-                                    }
-                                },
-                                "to": [
-                                    {
-                                        "mouse_key": {
-                                            "y": 1536
-                                        }
-                                    }
-                                ],
-                                "type": "basic"
-                            },
-                            {
-                                "conditions": [
-                                    {
-                                        "name": "mouse_layer",
-                                        "type": "variable_if",
-                                        "value": 1
-                                    }
-                                ],
-                                "from": {
-                                    "key_code": "k",
-                                    "modifiers": {
-                                        "optional": [
-                                            "any"
-                                        ]
-                                    }
-                                },
-                                "to": [
-                                    {
-                                        "mouse_key": {
-                                            "y": -1536
-                                        }
-                                    }
-                                ],
-                                "type": "basic"
-                            },
-                            {
-                                "conditions": [
-                                    {
-                                        "name": "mouse_layer",
-                                        "type": "variable_if",
-                                        "value": 1
-                                    }
-                                ],
-                                "from": {
-                                    "key_code": "l",
-                                    "modifiers": {
-                                        "optional": [
-                                            "any"
-                                        ]
-                                    }
-                                },
-                                "to": [
-                                    {
-                                        "mouse_key": {
-                                            "x": 1536
-                                        }
-                                    }
-                                ],
-                                "type": "basic"
-                            }
-                        ]
-                    },
-                    {
-                        "description": "Option + h/j/k/l → 방향키 (←/↓/↑/→), 다른 modifier는 그대로 통과",
-                        "manipulators": [
-                            {
-                                "from": {
-                                    "key_code": "h",
-                                    "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -880,12 +791,16 @@
                                 "type": "basic"
                             },
                             {
+                                "conditions": [
+                                    {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "j",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -899,12 +814,16 @@
                                 "type": "basic"
                             },
                             {
+                                "conditions": [
+                                    {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "k",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -918,12 +837,16 @@
                                 "type": "basic"
                             },
                             {
+                                "conditions": [
+                                    {
+                                        "name": "caps_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "l",
                                     "modifiers": {
-                                        "mandatory": [
-                                            "option"
-                                        ],
                                         "optional": [
                                             "any"
                                         ]
@@ -932,6 +855,95 @@
                                 "to": [
                                     {
                                         "key_code": "right_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Opt + h/j/k/l → 마우스 포인터 이동 (속도 1536)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": -1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": 1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": -1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": 1536
+                                        }
                                     }
                                 ],
                                 "type": "basic"

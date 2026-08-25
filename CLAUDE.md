@@ -50,50 +50,53 @@ sudo cp linux-keyboard/etc-default-keyboard /etc/default/keyboard
 - `7` = Home, `1` = End, `9/3` = 위/아래 스크롤
 - `0` = 뒤로(button4), `.` = 앞으로(button5)
 
-### 2) `Opt + h/j/k/l` = 방향키 (넘패드 없는 키보드용)
-`optional: ["any"]` 라서 나머지 modifier 는 그대로 통과한다 — 조합이 자연스럽게 합성된다:
+### 2) `Caps Lock + h/j/k/l` = 방향키
+Caps Lock 은 hidutil 로 F18 이 되어 아무 동작도 없던 죽은 키였다 → 내비게이션 레이어로 쓴다.
+`optional: ["any"]` 라서 나머지 modifier 는 그대로 통과하고, 조합이 자연스럽게 합성된다:
 
 | 누르는 키 | 나가는 키 | 결과 |
 |---|---|---|
-| `Opt+h/j/k/l` | `←/↓/↑/→` | 커서 이동 |
-| `Shift+Opt+…` | `Shift+화살표` | 선택 확장 |
-| `Ctrl+Opt+h`·`+l` | `Ctrl+←/→` | 왼/오른쪽 스페이스 이동 |
-| `Ctrl+Opt+k`·`+j` | `Ctrl+↑/↓` | Mission Control / App Exposé |
-| `Shift+Ctrl+Opt+…` | `Ctrl+Shift+화살표` | WezTerm pane 이동 (`wezterm.lua` 의 `nav`) |
-| `Cmd+Opt+h`·`+l` | `Cmd+←/→` | 줄 맨앞/맨뒤 (WezTerm 에선 `Ctrl+A`/`Ctrl+E`) |
-| `Fn+Opt+h`·`+l` | `Fn+←/→` | Home / End |
+| `CapsLock+h/j/k/l` | `←/↓/↑/→` | 커서 이동 |
+| `Shift+CapsLock+…` | `Shift+화살표` | 선택 확장 |
+| `Ctrl+CapsLock+h`·`+l` | `Ctrl+←/→` | 왼/오른쪽 스페이스 이동 |
+| `Ctrl+CapsLock+k`·`+j` | `Ctrl+↑/↓` | Mission Control / App Exposé |
+| `Shift+Ctrl+CapsLock+…` | `Ctrl+Shift+화살표` | WezTerm pane 이동 (`wezterm.lua` 의 `nav`) |
+| `Cmd+CapsLock+h`·`+l` | `Cmd+←/→` | 줄 맨앞/맨뒤 (WezTerm 에선 `Ctrl+A`/`Ctrl+E`) |
+| `Fn+CapsLock+h`·`+l` | `Fn+←/→` | Home / End |
 
-- Opt 를 **소비**하므로 WezTerm 의 `ALT+←/→`(단어 이동) 과 `ALT+↑/↓`(pane 이동) 은 이 경로로 안 걸린다.
-  물리 `Opt+←/→/↑/↓` 를 쓰면 그대로 동작한다.
-- 가려지는 기존 단축키: `Cmd+Opt+H`(다른 앱 가리기), Chrome `Cmd+Opt+J`(개발자 콘솔).
+- 트리거를 `caps_lock` 과 `f18` **둘 다** 등록해뒀다. `~/Library/LaunchAgents/com.local.KeyRemapping.plist`
+  가 로그인마다 hidutil 로 `caps_lock`(0x700000039) → `f18`(0x70000006D) 을 거는데, Karabiner 가
+  변환 전/후 중 무엇을 보는지는 계층 순서에 달려 있다. 양쪽 다 잡으면 어느 쪽이든 동작한다.
+  실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
+- 짧게 톡 누르면 `to_if_alone` 으로 원래 키가 나간다.
 - `Opt+b`/`Opt+w` = 단어 뒤/앞 이동(`Opt+←/→`). vim 모션, 레이어 없이 바로.
 
-### 3) `Opt+Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
+### 3) `Caps Lock + Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
 - `h`·`l` → `Opt+←/→` (단어), `k`·`j` → `Opt+↑/↓` (단락). Shift 를 더하면 선택 확장.
-- 레이어 키(`spacebar`)에 `option` 을 **필수**로 걸었다. 이게 핵심 안전장치다 — 그냥 `spacebar` 로
-  두면 일반 타이핑에서 "스페이스 누른 채 다음 글자" 가 `to_if_alone` 을 못 태워 **스페이스가 유실**되고,
-  길게 눌러도 반복 입력이 안 된다. Opt 필수라서 맨 스페이스는 Karabiner 를 아예 타지 않는다.
-- 대신 `Opt+Space` 의 원래 동작(non-breaking space) 은 없어지고, 톡 누르면 일반 스페이스가 나간다.
-- **⚠ Homerow 와 충돌**: Homerow 의 `non-search-shortcut` 이 `⌥Space` 다. Karabiner 가 더 아래
-  계층이라 `Opt+Space` 가 Homerow 까지 도달하지 않는다 → Homerow 비검색 모드가 안 뜬다.
-  둘 중 하나를 옮겨야 한다 (Homerow 단축키 변경, 또는 이 레이어 키를 다른 키로).
+- 레이어 키(`spacebar`) manipulator 에 **`caps_held` 조건**을 걸어 Caps Lock 을 누른 상태의 Space
+  만 잡는다. 맨 스페이스와 `Opt+Space` 는 Karabiner 를 아예 타지 않는다 — 이게 핵심이다:
+  - 조건 없이 `spacebar` 를 잡으면 일반 타이핑에서 "스페이스 누른 채 다음 글자" 가 `to_if_alone` 을
+    못 태워 **스페이스가 유실**되고, 길게 눌러도 반복 입력이 안 된다.
+  - 한때 `Opt+Space` 를 레이어 키로 썼는데 Homerow 의 `non-search-shortcut`(`⌥Space`) 을
+    가로채는 문제가 있었다. Caps Lock 게이팅으로 옮겨서 해소됨.
 
-### 4) `Caps Lock` 누른 채 = 마우스 (넘패드 모드의 hjkl 판)
-- `h/j/k/l` = 포인터 왼/아래/위/오 이동 (속도 `1536`, 넘패드와 동일)
-- `+Opt` 조합 — `h` = 좌클릭(`button1`), `l` = 우클릭(`button2`),
+### 4) `Opt + h/j/k/l` = 마우스 포인터 이동 (넘패드 모드의 hjkl 판)
+- 포인터 왼/아래/위/오 이동 (속도 `1536`, 넘패드와 동일)
+- `Opt+CapsLock` 조합 — `h` = 좌클릭(`button1`), `l` = 우클릭(`button2`),
   `k`·`j` = 위/아래 스크롤(`vertical_wheel` ∓48, 넘패드 9/3과 동일)
-- 트리거를 `caps_lock` 과 `f18` **둘 다** 등록해뒀다. 이 맥은
-  `~/Library/LaunchAgents/com.local.KeyRemapping.plist` 가 로그인마다 hidutil 로
-  `caps_lock`(0x700000039) → `f18`(0x70000006D) 을 거는데, Karabiner 가 변환 전/후 중 무엇을
-  보는지는 계층 순서에 달려 있다. 양쪽 다 잡으면 어느 쪽이든 동작한다.
-  실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
-- 짧게 톡 누르면 `to_if_alone` 으로 원래 키가 나간다. (F18 은 현재 아무 동작 없음)
+- 포인터 이동 manipulator 는 `optional: ["caps_lock"]` 로 **Opt 단독만** 매칭한다. 마우스 이동에
+  modifier 를 얹을 이유가 없고, 이렇게 좁혀두면 `Cmd+Opt+H`(다른 앱 가리기),
+  Chrome `Cmd+Opt+J`(개발자 콘솔), `Ctrl+Opt+화살표` 가 가려지지 않는다.
 
 ### ⚠ 규칙 순서 (고장나면 여기부터 보라)
-Karabiner 는 위에서부터 **첫 매칭**을 쓴다.
-- 레이어 규칙(3·4번)은 조건 없이 무조건 매칭되는 `Option + h/j/k/l` 규칙보다 **앞**에 있어야 한다.
-- 한 규칙 안에서도 `Opt` **필수** manipulator 가 `Opt` 없는 것보다 앞이어야 한다.
-  안 그러면 `optional: ["any"]` 인 이동 규칙이 `Caps Lock+Opt+h` 를 먼저 먹어서 클릭이 안 된다.
+Karabiner 는 위에서부터 **첫 매칭**을 쓴다. 현재 순서:
+`Caps Lock+Space`(단어) → `Caps Lock`(방향키) → `Opt`(포인터) → `Opt+b/w`
+- `Caps Lock+Space` 규칙이 `Caps Lock` 방향키 규칙보다 **앞**이어야 한다.
+  아니면 `CapsLock+Space+h` 가 그냥 `←` 로 먹힌다.
+- `Caps Lock` 규칙이 `Opt` 규칙보다 **앞**이어야 한다. 레이어 키는 modifier 가 아니라 일반 키로
+  소비되므로, `Opt+CapsLock+h` 를 Opt 규칙이 먼저 보면 클릭 대신 포인터 이동이 된다.
+- 한 규칙 안에서도 `Opt` **필수** manipulator 가 `Opt` 없는 것보다 앞이어야 한다. 안 그러면
+  `optional: ["any"]` 인 방향키 manipulator 가 `CapsLock+Opt+h` 를 먼저 먹어 클릭이 안 된다.
 
 ### 수정 후 검증
 ```bash
@@ -106,7 +109,7 @@ CLI="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
 ## Homerow (맥 — 키보드로 화면 클릭/스크롤, 마우스 대체)
 화면 위 클릭 가능한 요소에 라벨을 띄워 키보드로 클릭/스크롤. 현재 단축키:
 - `⌥/` (Option+/) = 검색 모드(search-shortcut)
-- `⌥Space` = 비검색 모드(non-search-shortcut) — **⚠ Karabiner 의 `Opt+Space` 단어이동 레이어와 충돌한다** (Karabiner 가 이김)
+- `⌥Space` = 비검색 모드(non-search-shortcut). (한때 Karabiner 의 `Opt+Space` 레이어와 충돌했으나, 그 레이어를 `Caps Lock+Space` 로 옮겨 해소됨)
 - `⇧⌘J` = 스크롤 모드(scroll-shortcut)
 - 자동 클릭 on, 로그인 시 자동 실행 on, 라벨 폰트 9pt.
 - 복원: `defaults import com.superultra.Homerow macos-keyboard/homerow.plist` 후 앱 재시작. (라이선스 키는 이 plist에 없음 — 별도 입력 필요)
