@@ -620,11 +620,6 @@
                                         }
                                     }
                                 ],
-                                "to_if_alone": [
-                                    {
-                                        "key_code": "caps_lock"
-                                    }
-                                ],
                                 "type": "basic"
                             },
                             {
@@ -650,11 +645,6 @@
                                             "name": "caps_held",
                                             "value": 0
                                         }
-                                    }
-                                ],
-                                "to_if_alone": [
-                                    {
-                                        "key_code": "f18"
                                     }
                                 ],
                                 "type": "basic"
@@ -944,6 +934,30 @@
                                         "mouse_key": {
                                             "x": 1536
                                         }
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "₩(\\ 키) → 한영 전환 (Ctrl+Space)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "backslash",
+                                    "modifiers": {
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "spacebar",
+                                        "modifiers": [
+                                            "left_control"
+                                        ]
                                     }
                                 ],
                                 "type": "basic"

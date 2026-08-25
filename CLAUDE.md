@@ -68,7 +68,9 @@ Caps Lock 은 hidutil 로 F18 이 되어 아무 동작도 없던 죽은 키였�
   가 로그인마다 hidutil 로 `caps_lock`(0x700000039) → `f18`(0x70000006D) 을 거는데, Karabiner 가
   변환 전/후 중 무엇을 보는지는 계층 순서에 달려 있다. 양쪽 다 잡으면 어느 쪽이든 동작한다.
   실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
-- 짧게 톡 누르면 `to_if_alone` 으로 원래 키가 나간다.
+- `to_if_alone` 은 **일부러 뺐다.** 예전엔 톡 누르면 `caps_lock` 이 그대로 나가서 macOS 의
+  "Caps Lock 키로 ABC 전환" 이 발동 = 한영 전환이었다. 한영을 `₩` 키로 옮기면서 이 경로를 끊었다.
+  지금 Caps Lock 은 순수 레이어 키이고, 톡 눌러도 아무 동작이 없다.
 
 ### 3) `Caps Lock + Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
 - `h`·`l` → `Opt+←/→` (단어), `k`·`j` → `Opt+↑/↓` (단락). Shift 를 더하면 선택 확장.
@@ -89,13 +91,24 @@ Caps Lock 은 hidutil 로 F18 이 되어 아무 동작도 없던 죽은 키였�
 
 ### ⚠ 규칙 순서 (고장나면 여기부터 보라)
 Karabiner 는 위에서부터 **첫 매칭**을 쓴다. 현재 순서:
-`Caps Lock+Space`(단어) → `Caps Lock`(방향키) → `Opt`(포인터) → `Opt+b/w`
+`Caps Lock+Space`(단어) → `Caps Lock`(방향키) → `Opt`(포인터) → `₩`(한영 전환)
 - `Caps Lock+Space` 규칙이 `Caps Lock` 방향키 규칙보다 **앞**이어야 한다.
   아니면 `CapsLock+Space+h` 가 그냥 `←` 로 먹힌다.
 - `Caps Lock` 규칙이 `Opt` 규칙보다 **앞**이어야 한다. 레이어 키는 modifier 가 아니라 일반 키로
   소비되므로, `Opt+CapsLock+h` 를 Opt 규칙이 먼저 보면 클릭 대신 포인터 이동이 된다.
 - 한 규칙 안에서도 `Opt` **필수** manipulator 가 `Opt` 없는 것보다 앞이어야 한다. 안 그러면
   `optional: ["any"]` 인 방향키 manipulator 가 `CapsLock+Opt+h` 를 먼저 먹어 클릭이 안 된다.
+
+### 5) `₩`(`\` 키) = 한영 전환
+- `\` 단독 → `Ctrl+Space`. macOS 심볼릭 핫키 id=60 "이전 입력 소스" 이고 enabled 상태다.
+  입력 소스가 ABC / 2SetKorean 둘뿐이라 토글로 동작한다.
+- 이 맥은 **US 배열 내장 키보드**(`KeyboardLanguage = "U.S."`, MacBookAir10,1) 라 전용 `₩` 키가
+  없다. 한글 모드에서 `₩` 를 내는 키가 Return 위의 `\|` 하나뿐이라 그 키를 잡았다 →
+  **맨 `\` 입력은 포기한 것이다** (사용자가 명시적으로 수용한 트레이드오프).
+- `optional: ["caps_lock"]` 로 **단독 입력만** 잡으므로 `Shift+\`(`|`) 와 `Opt+\`(`«`) 는 살아 있다.
+- 한영 전환 경로는 셋이다: `₩`, `Fn`(지구본 — `AppleFnUsageType = 2`, id=61 enabled), `Ctrl+Space`.
+- System Settings → 키보드 → 입력 소스의 "Caps Lock 키로 ABC 전환" 토글은 Karabiner 가 탭을
+  삼키므로 이제 무의미하다.
 
 ### 수정 후 검증
 ```bash
