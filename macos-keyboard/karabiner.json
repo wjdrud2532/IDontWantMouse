@@ -1,5 +1,8 @@
 {
-    "global": { "show_profile_name_in_menu_bar": true },
+    "global": {
+        "enable_notification_window": false,
+        "show_profile_name_in_menu_bar": true
+    },
     "profiles": [
         {
             "complex_modifications": {
@@ -8,21 +11,61 @@
                         "description": "Shift + NumLock → mouse_mode 토글 (즉시 전환)",
                         "manipulators": [
                             {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "keypad_num_lock",
-                                    "modifiers": { "mandatory": ["shift"], "optional": ["any"] }
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
                                 },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "set_variable": { "name": "mouse_mode", "value": 0 } }],
+                                "to": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_mode",
+                                            "value": 0
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_unless",
+                                        "value": 1
+                                    }
+                                ],
                                 "from": {
                                     "key_code": "keypad_num_lock",
-                                    "modifiers": { "mandatory": ["shift"], "optional": ["any"] }
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
                                 },
-                                "conditions": [{ "type": "variable_unless", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "set_variable": { "name": "mouse_mode", "value": 1 } }],
+                                "to": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_mode",
+                                            "value": 1
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             }
                         ]
@@ -31,27 +74,103 @@
                         "description": "Numpad 2/4/6/8 → 마우스 포인터 이동 (mouse_mode)",
                         "manipulators": [
                             {
-                                "from": { "key_code": "keypad_8", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "y": -1536 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_8",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": -1536
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_2", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "y": 1536 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_2",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": 1536
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_4", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "x": -1536 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_4",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": -1536
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_6", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "x": 1536 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_6",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": 1536
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             }
                         ]
@@ -60,27 +179,95 @@
                         "description": "Numpad 5 / * - → 마우스 클릭 (좌/좌/우/휠) (mouse_mode)",
                         "manipulators": [
                             {
-                                "from": { "key_code": "keypad_5", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button1" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_5",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button1"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_slash", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button1" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_slash",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button1"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_asterisk", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button2" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_asterisk",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button2"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_hyphen", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button3" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_hyphen",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button3"
+                                    }
+                                ],
                                 "type": "basic"
                             }
                         ]
@@ -89,27 +276,99 @@
                         "description": "Numpad 7/9/1/3 → Home / 위로 스크롤 / End / 아래로 스크롤 (mouse_mode)",
                         "manipulators": [
                             {
-                                "from": { "key_code": "keypad_7", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "key_code": "home" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_7",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "home"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_9", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "vertical_wheel": -48 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_9",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "vertical_wheel": -48
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_1", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "key_code": "end" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_1",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "end"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_3", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "mouse_key": { "vertical_wheel": 48 } }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_3",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "vertical_wheel": 48
+                                        }
+                                    }
+                                ],
                                 "type": "basic"
                             }
                         ]
@@ -118,15 +377,612 @@
                         "description": "Numpad 0 / . → 뒤로 / 앞으로 (mouse_mode)",
                         "manipulators": [
                             {
-                                "from": { "key_code": "keypad_0", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button4" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_0",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button4"
+                                    }
+                                ],
                                 "type": "basic"
                             },
                             {
-                                "from": { "key_code": "keypad_period", "modifiers": { "optional": ["any"] } },
-                                "conditions": [{ "type": "variable_if", "name": "mouse_mode", "value": 1 }],
-                                "to": [{ "pointing_button": "button5" }],
+                                "conditions": [
+                                    {
+                                        "name": "mouse_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "keypad_period",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button5"
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Opt + Space + h/j/k/l → 단어(←/→) / 단락(↑/↓) 단위 이동",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "spacebar",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "set_variable": {
+                                            "name": "word_mode",
+                                            "value": 1
+                                        }
+                                    }
+                                ],
+                                "to_after_key_up": [
+                                    {
+                                        "set_variable": {
+                                            "name": "word_mode",
+                                            "value": 0
+                                        }
+                                    }
+                                ],
+                                "to_if_alone": [
+                                    {
+                                        "key_code": "spacebar"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "left_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "down_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "up_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "right_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Caps Lock + h/j/k/l → 마우스 포인터 이동 / +Opt: h,l = 좌·우 클릭, k,j = 위·아래 스크롤(numpad 9,3)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "caps_lock",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_layer",
+                                            "value": 1
+                                        }
+                                    }
+                                ],
+                                "to_after_key_up": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_layer",
+                                            "value": 0
+                                        }
+                                    }
+                                ],
+                                "to_if_alone": [
+                                    {
+                                        "key_code": "caps_lock"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "f18",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_layer",
+                                            "value": 1
+                                        }
+                                    }
+                                ],
+                                "to_after_key_up": [
+                                    {
+                                        "set_variable": {
+                                            "name": "mouse_layer",
+                                            "value": 0
+                                        }
+                                    }
+                                ],
+                                "to_if_alone": [
+                                    {
+                                        "key_code": "f18"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button1"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "pointing_button": "button2"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "vertical_wheel": -48
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "vertical_wheel": 48
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": -1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": 1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "y": -1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "mouse_layer",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "mouse_key": {
+                                            "x": 1536
+                                        }
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Option + h/j/k/l → 방향키 (←/↓/↑/→), 다른 modifier는 그대로 통과",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "left_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "down_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "up_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "right_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Option + b/w → Opt+←/→ (단어 단위 이동, vim의 b/w)",
+                        "manipulators": [
+                            {
+                                "from": {
+                                    "key_code": "b",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "left_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "from": {
+                                    "key_code": "w",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "option"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "right_arrow",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
+                                    }
+                                ],
                                 "type": "basic"
                             }
                         ]
@@ -135,7 +991,10 @@
             },
             "name": "main",
             "selected": true,
-            "virtual_hid_keyboard": { "keyboard_type_v2": "ansi" }
+            "virtual_hid_keyboard": {
+                "indicate_sticky_modifier_keys_state": false,
+                "keyboard_type_v2": "ansi"
+            }
         }
     ]
 }
