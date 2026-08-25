@@ -119,4 +119,14 @@ CLI="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
 ```bash
 git add -A && git commit -m "update: <무엇을>" && git push
 ```
-- `origin` 은 **HTTPS**(`https://github.com/wjdrud2532/IDontWantMouse`). 푸시 인증은 레포 소유자의 **gh 토큰**을 쓴다 — 머신의 SSH 키와 별개이므로 origin 을 SSH 로 바꾸지 말 것.
+- `origin` 은 **HTTPS**(`https://github.com/wjdrud2532/IDontWantMouse`). SSH 로 바꾸지 말 것.
+- **맨 `git push` 는 403 이 난다.** 이 맥의 git 은 `credential.helper = osxkeychain` 이고 keychain 의
+  `github.com` 항목이 회사 계정(`jkhan-enerzai`)이라, `gh auth switch` 로 gh 활성 계정을 바꿔도 git 은
+  계속 회사 계정 토큰을 쓴다 → `Permission to wjdrud2532/IDontWantMouse.git denied to jkhan-enerzai`.
+  소유자 토큰을 URL 에 직접 넣어 1회성으로 푸시한다 (config 에 토큰이 남지 않는다):
+  ```bash
+  git push "https://wjdrud2532:$(gh auth token --user wjdrud2532)@github.com/wjdrud2532/IDontWantMouse.git" main
+  ```
+- 매번 치기 귀찮으면 keychain 에 개인 계정을 등록해두면 그 뒤로는 `git push` 만으로 된다:
+  `git remote set-url origin https://wjdrud2532@github.com/wjdrud2532/IDontWantMouse.git` 로 바꾼 뒤
+  첫 푸시에서 비밀번호 자리에 `gh auth token --user wjdrud2532` 출력값을 붙여넣는다.
