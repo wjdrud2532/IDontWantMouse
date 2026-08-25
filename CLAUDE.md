@@ -69,7 +69,6 @@ Caps Lock 은 hidutil 로 F18 이 되어 아무 동작도 없던 죽은 키였�
   변환 전/후 중 무엇을 보는지는 계층 순서에 달려 있다. 양쪽 다 잡으면 어느 쪽이든 동작한다.
   실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
 - 짧게 톡 누르면 `to_if_alone` 으로 원래 키가 나간다.
-- `Opt+b`/`Opt+w` = 단어 뒤/앞 이동(`Opt+←/→`). vim 모션, 레이어 없이 바로.
 
 ### 3) `Caps Lock + Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
 - `h`·`l` → `Opt+←/→` (단어), `k`·`j` → `Opt+↑/↓` (단락). Shift 를 더하면 선택 확장.
