@@ -99,14 +99,18 @@ Karabiner 는 위에서부터 **첫 매칭**을 쓴다. 현재 순서:
 - 한 규칙 안에서도 `Opt` **필수** manipulator 가 `Opt` 없는 것보다 앞이어야 한다. 안 그러면
   `optional: ["any"]` 인 방향키 manipulator 가 `CapsLock+Opt+h` 를 먼저 먹어 클릭이 안 된다.
 
-### 5) `₩`(`\` 키) = 한영 전환
-- `\` 단독 → `Ctrl+Space`. macOS 심볼릭 핫키 id=60 "이전 입력 소스" 이고 enabled 상태다.
-  입력 소스가 ABC / 2SetKorean 둘뿐이라 토글로 동작한다.
-- 이 맥은 **US 배열 내장 키보드**(`KeyboardLanguage = "U.S."`, MacBookAir10,1) 라 전용 `₩` 키가
-  없다. 한글 모드에서 `₩` 를 내는 키가 Return 위의 `\|` 하나뿐이라 그 키를 잡았다 →
-  **맨 `\` 입력은 포기한 것이다** (사용자가 명시적으로 수용한 트레이드오프).
-- `optional: ["caps_lock"]` 로 **단독 입력만** 잡으므로 `Shift+\`(`|`) 와 `Opt+\`(`«`) 는 살아 있다.
-- 한영 전환 경로는 셋이다: `₩`, `Fn`(지구본 — `AppleFnUsageType = 2`, id=61 enabled), `Ctrl+Space`.
+### 5) `₩` = 한영 전환 (grave 키 = 숫자 1 왼쪽, `~` 와 같은 키)
+- 그 키 단독 → **입력 소스를 직접 선택**해서 토글한다. 시스템 핫키(`Ctrl+Space`) 를 거치지 않는다:
+  - `input_source_if` `language ^en$` → `select_input_source` `language ^ko$`
+  - `input_source_unless` `language ^en$` → `select_input_source` `language ^en$`
+- **키 위치 주의 — 여기서 한 번 틀렸다.** 이 맥은 US 배열 내장 키보드
+  (`KeyboardLanguage = "U.S."`, MacBookAir10,1) 라 전용 `₩` 키가 없다. macOS 2벌식에서
+  `₩` 를 내는 키는 Return 위의 backslash 가 **아니라** 숫자 1 왼쪽의 grave
+  키(`grave_accent_and_tilde`) 다. backslash 로 잡았을 때는 규칙이 발동조차 안 해서 백틱/`₩`
+  만 입력되는 증상이 났다. 물리 키를 확인할 때는 `open -a Karabiner-EventViewer` 로 실제 key code 를 보라.
+- **맨 백틱 입력은 포기한 것이다** (사용자가 명시적으로 수용). `optional: ["caps_lock"]` 로 단독
+  입력만 잡으므로 `Shift` 조합(`~`) 은 살아 있고, backslash 키는 전혀 건드리지 않는다.
+- 한영 전환 경로는 둘이다: 이 키, 그리고 `Fn`(지구본 — `AppleFnUsageType = 2`, id=61 enabled).
 - System Settings → 키보드 → 입력 소스의 "Caps Lock 키로 ABC 전환" 토글은 Karabiner 가 탭을
   삼키므로 이제 무의미하다.
 
