@@ -50,70 +50,83 @@ sudo cp linux-keyboard/etc-default-keyboard /etc/default/keyboard
 - `7` = Home, `1` = End, `9/3` = 위/아래 스크롤
 - `0` = 뒤로(button4), `.` = 앞으로(button5)
 
-### 2) `Caps Lock + h/j/k/l` = 방향키
-Caps Lock 은 hidutil 로 F18 이 되어 아무 동작도 없던 죽은 키였다 → 내비게이션 레이어로 쓴다.
+### 2) `₩ + h/j/k/l` = 방향키  (₩ = grave 키, 숫자 1 왼쪽 · `~` 와 같은 키)
+예전엔 이 레이어 키가 Caps Lock 이었다. 2026-08-26 에 **Caps Lock ↔ ₩ 를 맞바꿨다.**
 `optional: ["any"]` 라서 나머지 modifier 는 그대로 통과하고, 조합이 자연스럽게 합성된다:
 
 | 누르는 키 | 나가는 키 | 결과 |
 |---|---|---|
-| `CapsLock+h/j/k/l` | `←/↓/↑/→` | 커서 이동 |
-| `Shift+CapsLock+…` | `Shift+화살표` | 선택 확장 |
-| `Ctrl+CapsLock+h`·`+l` | `Ctrl+←/→` | 왼/오른쪽 스페이스 이동 |
-| `Ctrl+CapsLock+k`·`+j` | `Ctrl+↑/↓` | Mission Control / App Exposé |
-| `Shift+Ctrl+CapsLock+…` | `Ctrl+Shift+화살표` | WezTerm pane 이동 (`wezterm.lua` 의 `nav`) |
-| `Cmd+CapsLock+h`·`+l` | `Cmd+←/→` | 줄 맨앞/맨뒤 (WezTerm 에선 `Ctrl+A`/`Ctrl+E`) |
-| `Fn+CapsLock+h`·`+l` | `Fn+←/→` | Home / End |
+| `₩+h/j/k/l` | `←/↓/↑/→` | 커서 이동 |
+| `Shift+₩+…` | `Shift+화살표` | 선택 확장 |
+| `Ctrl+₩+h`·`+l` | `Ctrl+←/→` | 왼/오른쪽 스페이스 이동 |
+| `Ctrl+₩+k`·`+j` | `Ctrl+↑/↓` | Mission Control / App Exposé |
+| `Shift+Ctrl+₩+…` | `Ctrl+Shift+화살표` | WezTerm pane 이동 (`wezterm.lua` 의 `nav`) |
+| `Cmd+₩+h`·`+l` | `Cmd+←/→` | 줄 맨앞/맨뒤 (WezTerm 에선 `Ctrl+A`/`Ctrl+E`) |
+| `Fn+₩+h`·`+l` | `Fn+←/→` | Home / End |
 
-- 트리거를 `caps_lock` 과 `f18` **둘 다** 등록해뒀다. `~/Library/LaunchAgents/com.local.KeyRemapping.plist`
-  가 로그인마다 hidutil 로 `caps_lock`(0x700000039) → `f18`(0x70000006D) 을 거는데, Karabiner 가
-  변환 전/후 중 무엇을 보는지는 계층 순서에 달려 있다. 양쪽 다 잡으면 어느 쪽이든 동작한다.
-  실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
-- `to_if_alone` 은 **일부러 뺐다.** 예전엔 톡 누르면 `caps_lock` 이 그대로 나가서 macOS 의
-  "Caps Lock 키로 ABC 전환" 이 발동 = 한영 전환이었다. 한영을 `₩` 키로 옮기면서 이 경로를 끊었다.
-  지금 Caps Lock 은 순수 레이어 키이고, 톡 눌러도 아무 동작이 없다.
+- 레이어 변수는 `nav_held`, 트리거 manipulator 는 `grave_accent_and_tilde` 하나뿐이다.
+- **`to_if_held_down` 으로 레이어를 켜지 말 것 — 여기서 한 번 데였다.** (2026-08-27 수정)
+  예전엔 `to_if_held_down` + `basic.to_if_held_down_threshold_milliseconds: 150` 으로
+  `nav_held=1` 을 걸었는데, 그러면 **₩ 를 150ms 넘게 누르고 있어야** 레이어가 켜진다.
+  빠르게 `₩→h` 를 치면 h 가 도착한 시점에 `nav_held` 가 아직 `0` 이라 방향키 조건이 안 걸리고,
+  `₩` 는 `to_if_alone` 으로 그대로 찍히고 `h` 도 글자로 들어간다 = **"₩ 가 가끔 인식이 안 되는"** 증상.
+  지금은 key_down 즉시 `to` 로 `nav_held=1` 을 세워 지연이 0 이다:
+  ```json
+  "to":              [{ "set_variable": { "name": "nav_held", "value": 1 } }],
+  "to_after_key_up": [{ "set_variable": { "name": "nav_held", "value": 0 } }],
+  "to_if_alone":     [{ "key_code": "grave_accent_and_tilde" }],
+  "parameters":      { "basic.to_if_alone_timeout_milliseconds": 1000 }
+  ```
+- **트레이드오프(수용함)**: 키를 떼는 순간 `nav_held` 가 0 이 되므로 `` `code` `` 처럼 순차
+  타이핑은 멀쩡하다. 다만 **₩ 를 덜 뗀 채 h/j/k/l 이 겹쳐 눌리는 롤오버**는 방향키로 나간다.
+  거슬리면 절충으로 `to_if_held_down` 을 60~80ms 로 되살린다 (150ms 는 확실히 너무 길다).
+- `to_if_alone` 은 Caps Lock 시절과 달리 **살려둬야 한다.** 이 키가 백틱/`₩` 의 유일한 입력 경로다.
+- Caps Lock 은 지금 **완전히 죽은 키**다. `~/Library/LaunchAgents/com.local.KeyRemapping.plist`
+  가 로그인마다 hidutil 로 `caps_lock`(0x700000039) → `f18`(0x70000006D) 을 걸고, Karabiner 에는
+  `f18`/`caps_lock` **트리거 규칙이 하나도 없다.** 실제로 뭐가 오는지는 `open -a Karabiner-EventViewer` 로 확인.
 
-### 3) `Caps Lock + Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
+### 3) `₩ + Space` 누른 채 `h/j/k/l` = 단어/단락 단위 이동
 - `h`·`l` → `Opt+←/→` (단어), `k`·`j` → `Opt+↑/↓` (단락). Shift 를 더하면 선택 확장.
-- 레이어 키(`spacebar`) manipulator 에 **`caps_held` 조건**을 걸어 Caps Lock 을 누른 상태의 Space
+- 레이어 키(`spacebar`) manipulator 에 **`nav_held` 조건**을 걸어 ₩ 를 누른 상태의 Space
   만 잡는다. 맨 스페이스와 `Opt+Space` 는 Karabiner 를 아예 타지 않는다 — 이게 핵심이다:
   - 조건 없이 `spacebar` 를 잡으면 일반 타이핑에서 "스페이스 누른 채 다음 글자" 가 `to_if_alone` 을
     못 태워 **스페이스가 유실**되고, 길게 눌러도 반복 입력이 안 된다.
   - 한때 `Opt+Space` 를 레이어 키로 썼는데 Homerow 의 `non-search-shortcut`(`⌥Space`) 을
-    가로채는 문제가 있었다. Caps Lock 게이팅으로 옮겨서 해소됨.
+    가로채는 문제가 있었다. 레이어 키 게이팅으로 옮겨서 해소됨.
+- 이 Space manipulator 도 `to` 로 `word_mode=1` 을 **즉시** 세운다. 2) 와 같은 이유로 여기에
+  `to_if_held_down` 을 쓰면 안 된다.
 
 ### 4) `Opt + h/j/k/l` = 마우스 포인터 이동 (넘패드 모드의 hjkl 판)
 - 포인터 왼/아래/위/오 이동 (속도 `1536`, 넘패드와 동일)
-- `Opt+CapsLock` 조합 — `h` = 좌클릭(`button1`), `l` = 우클릭(`button2`),
+- `Opt+₩` 조합 — `h` = 좌클릭(`button1`), `l` = 우클릭(`button2`),
   `k`·`j` = 위/아래 스크롤(`vertical_wheel` ∓48, 넘패드 9/3과 동일)
-- 포인터 이동 manipulator 는 `optional: ["caps_lock"]` 로 **Opt 단독만** 매칭한다. 마우스 이동에
+- 포인터 이동 manipulator 는 `optional: ["caps_lock"]` 로 **Opt 단독만** 매칭한다. (여기의
+  `caps_lock` 은 레이어 키가 아니라 Caps Lock **LED 상태** modifier — 레이어를 ₩ 로 옮긴 뒤
+  남은 잔재지만 "`any` 가 아니다" 는 의도는 그대로라 건드리지 않았다.) 마우스 이동에
   modifier 를 얹을 이유가 없고, 이렇게 좁혀두면 `Cmd+Opt+H`(다른 앱 가리기),
   Chrome `Cmd+Opt+J`(개발자 콘솔), `Ctrl+Opt+화살표` 가 가려지지 않는다.
 
 ### ⚠ 규칙 순서 (고장나면 여기부터 보라)
-Karabiner 는 위에서부터 **첫 매칭**을 쓴다. 현재 순서:
-`Caps Lock+Space`(단어) → `Caps Lock`(방향키) → `Opt`(포인터) → `₩`(한영 전환)
-- `Caps Lock+Space` 규칙이 `Caps Lock` 방향키 규칙보다 **앞**이어야 한다.
-  아니면 `CapsLock+Space+h` 가 그냥 `←` 로 먹힌다.
-- `Caps Lock` 규칙이 `Opt` 규칙보다 **앞**이어야 한다. 레이어 키는 modifier 가 아니라 일반 키로
-  소비되므로, `Opt+CapsLock+h` 를 Opt 규칙이 먼저 보면 클릭 대신 포인터 이동이 된다.
+Karabiner 는 위에서부터 **첫 매칭**을 쓴다. 현재 순서(총 8개):
+`넘패드 마우스 0~4` → `₩+Space`(단어) → `₩`(방향키) → `Opt`(포인터)
+- `₩+Space` 규칙이 `₩` 방향키 규칙보다 **앞**이어야 한다. 아니면 `₩+Space+h` 가 그냥 `←` 로 먹힌다.
+- `₩` 규칙이 `Opt` 규칙보다 **앞**이어야 한다. 레이어 키는 modifier 가 아니라 일반 키로
+  소비되므로, `Opt+₩+h` 를 Opt 규칙이 먼저 보면 클릭 대신 포인터 이동이 된다.
 - 한 규칙 안에서도 `Opt` **필수** manipulator 가 `Opt` 없는 것보다 앞이어야 한다. 안 그러면
-  `optional: ["any"]` 인 방향키 manipulator 가 `CapsLock+Opt+h` 를 먼저 먹어 클릭이 안 된다.
+  `optional: ["any"]` 인 방향키 manipulator 가 `₩+Opt+h` 를 먼저 먹어 클릭이 안 된다.
 
-### 5) `₩` = 한영 전환 (grave 키 = 숫자 1 왼쪽, `~` 와 같은 키)
-- 그 키 단독 → **입력 소스를 직접 선택**해서 토글한다. 시스템 핫키(`Ctrl+Space`) 를 거치지 않는다:
-  - `input_source_if` `language ^en$` → `select_input_source` `language ^ko$`
-  - `input_source_unless` `language ^en$` → `select_input_source` `language ^en$`
-- **키 위치 주의 — 여기서 한 번 틀렸다.** 이 맥은 US 배열 내장 키보드
+### 5) 한영 전환 = `Fn`(지구본) + 시스템 기본 `Ctrl+Space`
+- `AppleFnUsageType = 2` (Fn = 입력 소스 변경). `com.apple.symbolichotkeys` 의 60/61 은 따로
+  설정하지 않아 macOS 기본값(`Ctrl+Space`)이 그대로 살아 있다.
+- **Karabiner 에는 한영 전환 규칙이 없다.** 예전엔 `₩` 단독 탭이 `select_input_source` 로 한영을
+  토글했지만, ₩ 를 내비게이션 레이어 키로 쓰면서 그 규칙을 통째로 뺐다 (2026-08-26).
+  그 이전엔 Caps Lock 이 한영이었다. 되살리려면 `to_if_alone` 자리를 다투게 되니 주의.
+- **키 위치 메모 (여기서 한 번 틀렸다).** 이 맥은 US 배열 내장 키보드
   (`KeyboardLanguage = "U.S."`, MacBookAir10,1) 라 전용 `₩` 키가 없다. macOS 2벌식에서
   `₩` 를 내는 키는 Return 위의 backslash 가 **아니라** 숫자 1 왼쪽의 grave
-  키(`grave_accent_and_tilde`) 다. backslash 로 잡았을 때는 규칙이 발동조차 안 해서 백틱/`₩`
-  만 입력되는 증상이 났다. 물리 키를 확인할 때는 `open -a Karabiner-EventViewer` 로 실제 key code 를 보라.
-- **맨 백틱 입력은 포기한 것이다** (사용자가 명시적으로 수용). `optional: ["caps_lock"]` 로 단독
-  입력만 잡으므로 `Shift` 조합(`~`) 은 살아 있고, backslash 키는 전혀 건드리지 않는다.
-- 한영 전환 경로는 둘이다: 이 키, 그리고 `Fn`(지구본 — `AppleFnUsageType = 2`, id=61 enabled).
-- System Settings → 키보드 → 입력 소스의 "Caps Lock 키로 ABC 전환" 토글은 Karabiner 가 탭을
-  삼키므로 이제 무의미하다.
-
+  키(`grave_accent_and_tilde`) 다. 물리 키 확인은 `open -a Karabiner-EventViewer`.
+- System Settings → 키보드 → 입력 소스의 "Caps Lock 키로 ABC 전환" 토글은 Caps Lock 이
+  hidutil 로 F18 이 되어 있어 무의미하다.
 ### 수정 후 검증
 ```bash
 CLI="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
@@ -125,9 +138,9 @@ CLI="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
 ## Homerow (맥 — 키보드로 화면 클릭/스크롤, 마우스 대체)
 화면 위 클릭 가능한 요소에 라벨을 띄워 키보드로 클릭/스크롤. 현재 단축키:
 - `⌥/` (Option+/) = 검색 모드(search-shortcut)
-- `⌥Space` = 비검색 모드(non-search-shortcut). (한때 Karabiner 의 `Opt+Space` 레이어와 충돌했으나, 그 레이어를 `Caps Lock+Space` 로 옮겨 해소됨)
+- `⌥Space` = 비검색 모드(non-search-shortcut). (한때 Karabiner 의 `Opt+Space` 레이어와 충돌했으나, 그 레이어를 `₩+Space` 로 옮겨 해소됨)
 - `⇧⌘J` = 스크롤 모드(scroll-shortcut)
-- 자동 클릭 on, 로그인 시 자동 실행 on, 라벨 폰트 9pt.
+- 자동 클릭 on, 로그인 시 자동 실행 on, 라벨 폰트 9pt, `auto-activate-mission-control` on.
 - 복원: `defaults import com.superultra.Homerow macos-keyboard/homerow.plist` 후 앱 재시작. (라이선스 키는 이 plist에 없음 — 별도 입력 필요)
 
 ## Linux 키보드 (XKB)
