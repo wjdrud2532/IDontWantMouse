@@ -60,6 +60,7 @@
 | WezTerm AX 창 번호 = CG 창 번호 | `_AXUIElementGetWindow`와 `CGWindowListCopyWindowInfo` 비교 | 확인됨: 같음 |
 | Slack 스크롤 영역 | AX 트리 탐색 | 확인됨: 창 전체 틀 하나만 노출, 스크롤 관련 AX 속성 없음 → 공통 규칙(스크롤 막대 / 목록 역할 / 이름에 'scroll')으로 채널 목록·메시지·스레드 3개를 찾게 됨 |
 | 공통 규칙을 여러 앱에 적용 | `--dump` | 확인됨: Slack 3개, VS Code 3개, Chrome(HN) 1개, WezTerm 4개 |
+| 웹 페이지의 가짜 스크롤 영역 (GitHub 폴더 페이지) | Chrome·숨긴 Safari 에서 `--dump` | 확인됨: 전에는 다 보이는 파일 트리·파일 표가 영역으로 잡히고 페이지 전체가 빠짐. 이제 이름·스크롤 막대 없는 목록·표는 줄이 목록 밖으로 나가거나 목록이 조상 틀 밖으로 나갈 때만 남기고, 겹친 후보(안쪽이 70% 이상)는 바깥 하나만, 브라우저는 페이지 전체를 늘 남김. 짧은 트리 페이지 → 페이지 1개, 긴 트리(swift/stdlib/public/core) → 페이지 + 트리 2개, HN·위키 1개, Apple 문서 2개(페이지 + 목차). Slack 3개·VS Code 3개·WezTerm 4개 그대로 |
 | 빈 환경에서 `wezterm cli` 연결 | `env -i HOME=… wezterm cli list` | 확인됨: 메뉴 막대에서 실행된 Hanmium도 연결됨 |
 | 새 WezTerm 창의 분할 창 | 시험 창 + `--dump` | 처음에 실패: 새 창의 CLI 창 제목이 빈 문자열이라 제목으로 짝을 못 지음 → 창 크기로 짝짓게 고친 뒤 확인됨 |
 

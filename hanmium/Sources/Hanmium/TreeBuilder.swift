@@ -377,6 +377,18 @@ final class TreeBuilder {
         for a in areas where !unique.contains(where: { $0.visibleFrame.isClose(to: a.visibleFrame, tolerance: 8) }) {
             unique.append(a)
         }
+        // 다른 후보 안에 들어 있고 그 70% 넘게 덮는 후보는 뺀다 (패널과 그 안의 목록처럼 같은 곳이 두 번 잡히지 않게).
+        // 휠은 가까운 스크롤 가능한 조상으로 가므로 바깥 것만 남겨도 같은 곳이 스크롤된다.
+        let size = { (r: CGRect) in r.width * r.height }
+        unique = unique.filter { inner in
+            !unique.contains { outer in
+                outer !== inner && outer.visibleFrame.insetBy(dx: -4, dy: -4).contains(inner.visibleFrame)
+                    && size(inner.visibleFrame) >= size(outer.visibleFrame) * 0.7
+                    && !outer.visibleFrame.isClose(to: inner.visibleFrame, tolerance: 8)
+            }
+        }
+        // 브라우저는 페이지 전체가 가장 중요한 스크롤 영역이라 늘 남긴다
+        if let bundleID, Self.browsers.contains(bundleID) { return unique }
         // 웹 앱 바깥 틀(Slack 의 창 전체처럼 스크롤 막대가 없는 AXScrollArea)은 안쪽 후보들이 대부분 덮으면 뺀다.
         // 안 그러면 스크롤되지 않는 틀이 가장 큰 영역이라 먼저 골라진다.
         return unique.filter { outer in
@@ -386,6 +398,24 @@ final class TreeBuilder {
             let inner = unique.filter { $0 !== outer && outer.visibleFrame.insetBy(dx: -4, dy: -4).contains($0.visibleFrame) }
             return Self.coverage(of: outer.visibleFrame, by: inner.map(\.visibleFrame)) < 0.6
         }
+    }
+
+    /// 웹 브라우저 (페이지 전체 스크롤을 늘 남긴다)
+    static let browsers: Set<String> = AXEnabler.chromiumBrowsers.union([
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition",
+        "com.operasoftware.Opera", "app.zen-browser.zen",
+    ])
+
+    /// 안쪽 항목(표·트리는 줄)이 영역 밖(위·아래)까지 이어지는지: 그래야 스크롤되는 영역이다. 앞뒤 몇 개만 본다.
+    private static func overflows(_ children: [AXUIElement], frame: CGRect) -> Bool {
+        let sample = children.count <= 8 ? children : Array(children.prefix(4) + children.suffix(4))
+        for child in sample {
+            let v = AX.multi(child, [kAXPositionAttribute, kAXSizeAttribute])
+            // 가운데가 밖이어야 넘친 것 (머리글처럼 몇 px 삐져나온 것은 아니다)
+            guard let o = AX.point(v[0]), let s = AX.size(v[1]), s.height >= 8 else { continue }
+            if o.y + s.height / 2 < frame.minY || o.y + s.height / 2 > frame.maxY { return true }
+        }
+        return false
     }
 
     /// rect 가 rects 로 덮인 비율(격자 표본으로 어림)
@@ -412,7 +442,10 @@ final class TreeBuilder {
         var found: [Element] = []
         var budget = 3000
 
-        func visit(_ ref: AXUIElement, depth: Int) {
+        var page = CGRect.null
+
+        // bounds: 웹 영역 바로 아래부터 조상들의 틀이 겹친 곳. 목록이 여기를 벗어나면 어느 조상 안에서 스크롤된다.
+        func visit(_ ref: AXUIElement, depth: Int, bounds: CGRect?) {
             guard depth < 60, budget > 0 else { return }
             budget -= 1
             let v = AX.multi(ref, [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, "AXDOMClassList",
@@ -420,22 +453,35 @@ final class TreeBuilder {
             let role = AX.string(v[0]) ?? ""
             // 작은 요소 안에는 쓸 만한 스크롤 영역이 없다고 보고 내려가지 않는다
             guard let origin = AX.point(v[1]), let size = AX.size(v[2]) else {
-                for child in AX.elements(v[6]) { visit(child, depth: depth + 1) }
+                for child in AX.elements(v[6]) { visit(child, depth: depth + 1, bounds: bounds) }
                 return
             }
-            let frame = CGRect(origin: origin, size: size).intersection(clip)
+            let whole = CGRect(origin: origin, size: size)
+            let frame = whole.intersection(clip)
             guard !frame.isNull, frame.width >= 140, frame.height >= 100 else { return }
+            if depth == 0 { page = whole }
             if depth > 0 {
                 let names = ((v[3] as? [String]) ?? []) + [AX.string(v[4]) ?? ""]
                 let scrolly = names.contains { $0.range(of: "scroll", options: .caseInsensitive) != nil }
-                if scrolly || v[5] != nil || listRoles.contains(role), let e = Element.fetch(ref, clip: clip) {
+                // 이름도 스크롤 막대도 없는 목록·표는 내용이 실제로 넘칠 때만 (다 보이는 표는 스크롤되지 않는다):
+                // 줄이 목록 밖으로 나가거나(목록 자체가 스크롤) 목록이 조상 틀 밖으로 나갈 때(감싼 상자가 스크롤).
+                // 이름에 scroll 이 든 것은 그대로 둔다: 보이는 줄만 그리는 가상 목록(Slack)은 줄이 넘치지 않는다.
+                func overflowing() -> Bool {
+                    if let bounds, whole.minY < bounds.minY - 8 || whole.maxY > bounds.maxY + 8 { return true }
+                    let items = role == "AXList" ? AX.elements(v[6]) : AX.elements(AX.copy(ref, kAXRowsAttribute))
+                    return Self.overflows(items, frame: whole)
+                }
+                if scrolly || v[5] != nil || listRoles.contains(role) && overflowing(),
+                   let e = Element.fetch(ref, clip: clip) {
                     found.append(e)
                 }
                 if skipRoles.contains(role) { return }
             }
-            for child in AX.elements(v[6]) { visit(child, depth: depth + 1) }
+            // 페이지 전체 크기의 틀(body 등)은 페이지가 스크롤하므로 경계로 치지 않는다
+            let inner = depth == 0 || whole.isClose(to: page, tolerance: 8) ? bounds : (bounds?.intersection(whole) ?? whole)
+            for child in AX.elements(v[6]) { visit(child, depth: depth + 1, bounds: inner) }
         }
-        visit(web, depth: 0)
+        visit(web, depth: 0, bounds: nil)
         return found
     }
 

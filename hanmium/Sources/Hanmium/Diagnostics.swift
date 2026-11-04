@@ -66,7 +66,8 @@ enum Diagnostics {
                 && areas[0].visibleFrame.width * areas[0].visibleFrame.height >= w.width * w.height * 0.85
             if areas.count == 1, areas[0].role == kAXWindowRole {
                 add(.warn, "스크롤 영역을 찾지 못해 창 전체에 휠을 보냅니다")
-            } else if wholeWindow && isWebApp(running) {
+            } else if wholeWindow && isWebApp(running) && !TreeBuilder.browsers.contains(running.bundleIdentifier ?? "") {
+                // 브라우저는 페이지 하나뿐인 사이트가 흔하다 — 그때는 페이지 전체가 맞다
                 add(.warn, "웹 화면(Electron·Chromium)인데 안쪽 스크롤 영역을 찾지 못했습니다 — 창 전체 하나로 잡힙니다")
             } else {
                 add(.ok, "스크롤 영역 \(areas.count)개")
