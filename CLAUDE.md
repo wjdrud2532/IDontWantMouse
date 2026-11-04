@@ -13,7 +13,9 @@
 | `wezterm/wezterm.lua` | `~/.wezterm.lua` | 맥 (정본, 크로스플랫폼 공용) |
 | `wezterm/wezterm.linux-jkhan.lua` | `~/.wezterm.lua` | 리눅스 `jkhan` (스냅샷, 맥과 일부 다름) |
 | `macos-keyboard/karabiner.json` | `~/.config/karabiner/karabiner.json` | 맥 |
-| `macos-keyboard/homerow.plist` | `~/Library/Preferences/com.superultra.Homerow.plist` | 맥 (`defaults import` 로 복원) |
+| `hanmium/` | 소스 (빌드: `hanmium/build.sh` → `hanmium/build/Hanmium.app`) | 맥 |
+| `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (설정 › 고급 › 가져오기·내보내기) | 맥 |
+| `macos-keyboard/homerow.plist` | `~/Library/Preferences/com.superultra.Homerow.plist` | 맥 (참고용 — Homerow 는 지웠다) |
 | `linux-keyboard/xkb/keymap/jkhan` | `~/.xkb/keymap/jkhan` | 리눅스 `jkhan` |
 | `linux-keyboard/xkb/symbols/jkhan` | `~/.xkb/symbols/jkhan` | 리눅스 `jkhan` |
 | `linux-keyboard/etc-default-keyboard` | `/etc/default/keyboard` | 리눅스 `jkhan` (root, `sudo` 필요) |
@@ -135,7 +137,19 @@ CLI="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
 "$CLI" --select-profile main                       # 자동 리로드가 안 먹었을 때 강제
 ```
 
-## Homerow (맥 — 키보드로 화면 클릭/스크롤, 마우스 대체)
+## Hanmium (맥 — Homerow 를 대신하는 직접 만든 앱)
+Homerow 를 참고해 Swift 로 다시 만든 메뉴 막대 앱. 2026-11-04 에 Homerow 를 지우고 이걸로 바꿨다.
+단축키는 Homerow 그대로: `⌥Space` 라벨 클릭, `⌥/` 검색, `⇧⌘J` 스크롤(숫자·Tab 으로 분할 창 고르기, Enter 로 그 창 클릭).
+- **빌드·실행**: `cd hanmium && ./build.sh && open -n build/Hanmium.app`. 키체인에 "Hanmium Local Code Signing"
+  인증서가 있으면 그걸로 서명해서 다시 빌드해도 손쉬운 사용 권한이 유지된다(없으면 임시 서명이라 빌드마다 다시 허용).
+- **권한**: 손쉬운 사용(필수), 화면 기록(유리 라벨 굴절 — 없으면 흐림으로 그림).
+- **설정 백업 갱신**: 설정 › 고급 › 설정 내보내기… 로 `macos-keyboard/hanmium-settings.json` 에 덮어쓴다.
+- **문제가 생기면**: `~/Library/Logs/Hanmium.log`(스크롤 모드 판단·라벨 시간), 메뉴 막대 › "‹앱› 점검…",
+  `hanmium/Tools/check-apps.sh`(실행 중인 앱 호환성 점검), `hanmium/Tools/e2e-wezterm.sh`(시험용 WezTerm 창 회귀 테스트).
+  테스트·측정 기록은 `hanmium/TESTING.md`.
+- `hanmium/` 은 `~/Hanmium` 작업 폴더의 복사본이다. 고친 뒤에는 다시 복사해서 커밋한다.
+
+## Homerow (맥 — 예전에 쓰던 것, 참고용. 2026-11-04 에 지움)
 화면 위 클릭 가능한 요소에 라벨을 띄워 키보드로 클릭/스크롤. 현재 단축키:
 - `⌥/` (Option+/) = 검색 모드(search-shortcut)
 - `⌥Space` = 비검색 모드(non-search-shortcut). (한때 Karabiner 의 `Opt+Space` 레이어와 충돌했으나, 그 레이어를 `₩+Space` 로 옮겨 해소됨)
