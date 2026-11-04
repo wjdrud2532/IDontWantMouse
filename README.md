@@ -9,7 +9,7 @@
 | `wezterm/wezterm.lua` | WezTerm 설정 (크로스플랫폼 공용, 맥 기준 최신). Leader(Ctrl+a) 기반 분할/이동, 포커스된 pane 초록 배경 표시, pane 이동 0ms 반영 등 | macOS `~/.wezterm.lua` |
 | `wezterm/wezterm.linux-jkhan.lua` | Linux(jkhan) 박스의 WezTerm 설정 스냅샷 (맥 버전과 일부 다름) | Linux `~/.wezterm.lua` |
 | `macos-keyboard/karabiner.json` | Karabiner-Elements 설정. 넘패드로 마우스 제어 + `₩`(grave = 숫자 1 왼쪽) 레이어(방향키 / +Space 단어·단락 이동) + `Opt` 레이어(마우스 포인터 / +₩ 클릭·스크롤). 한영 전환은 Karabiner 밖(Fn 지구본 키) | macOS `~/.config/karabiner/karabiner.json` |
-| [`hanmium/`](hanmium/) | **Hanmium** — Homerow 대신 쓰는 직접 만든 앱(Swift). 키보드로 화면 요소 라벨 클릭(`⌥Space`)·검색(`⌥/`)·스크롤(`⇧⌘J`), 리퀴드 글래스 라벨. 소스 전체 — 사용법·기능·설정은 [hanmium/README.md](hanmium/README.md) | 빌드해서 실행 (아래 복원 방법) |
+| [`hanmium/`](hanmium/) | **Hanmium** — 직접 만든 앱(Swift). 키보드로 화면 요소 라벨 클릭(`⌥Space`)·검색(`⌥/`)·스크롤(`⇧⌘J`), 리퀴드 글래스 라벨. 소스 전체 — 사용법·기능·설정은 [hanmium/README.md](hanmium/README.md) | 빌드해서 실행 (아래 복원 방법) |
 | `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (라벨·스크롤·유리 효과 등, 기본값과 다른 것만) | Hanmium 설정 › 고급 › 설정 가져오기 |
 | `macos-keyboard/homerow.plist` | Homerow 설정 (참고용 — 2026-11-04 에 Homerow 를 지우고 Hanmium 으로 바꿨다) | macOS `~/Library/Preferences/com.superultra.Homerow.plist` |
 | `linux-keyboard/xkb/keymap/jkhan` | 커스텀 XKB keymap | Linux `~/.xkb/keymap/jkhan` |
@@ -28,7 +28,7 @@ cp wezterm/wezterm.lua ~/.wezterm.lua
 cp macos-keyboard/karabiner.json ~/.config/karabiner/karabiner.json
 ```
 
-### macOS — Hanmium (Homerow 대체)
+### macOS — Hanmium
 ```bash
 cd hanmium
 ./build.sh                 # build/Hanmium.app 생성 (Command Line Tools 만 있으면 된다)
@@ -36,7 +36,7 @@ open build/Hanmium.app
 ```
 - 처음 실행하면 **손쉬운 사용** 권한(필수)과 **화면 기록** 권한(유리 라벨의 굴절용)을 허용한다.
 - 설정 복원: 메뉴 막대 Hanmium 아이콘 › 설정… › 고급 › **설정 가져오기…** 에서 `macos-keyboard/hanmium-settings.json` 선택.
-- 단축키는 Homerow 와 같다: `⌥Space` 라벨 클릭, `⌥/` 검색, `⇧⌘J` 스크롤. 자세한 테스트·측정 기록은 [`hanmium/TESTING.md`](hanmium/TESTING.md).
+- 단축키: `⌥Space` 라벨 클릭, `⌥/` 검색, `⇧⌘J` 스크롤. 자세한 테스트·측정 기록은 [`hanmium/TESTING.md`](hanmium/TESTING.md).
 
 ### macOS — Homerow (예전 설정, 참고용)
 ```bash
