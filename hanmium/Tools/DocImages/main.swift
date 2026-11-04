@@ -14,6 +14,7 @@ struct Item {
     let comments: Int
 }
 
+setvbuf(stdout, nil, _IOLBF, 0)
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "docs/images"
 let scale: CGFloat = 2
 
@@ -247,4 +248,193 @@ MainActor.assumeIsolated {
     view.cacheDisplay(in: view.bounds, to: rep)
     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(outDir)/settings.png"))
     print("만듦: \(outDir)/settings.png")
+}
+
+// MARK: 6~8. VS Code·Slack 라벨, Slack 다중 스크롤 동영상 (지어낸 내용의 비슷한 화면)
+
+func render(size: CGSize, scale s: CGFloat, _ body: () -> Void) -> CGImage? {
+    guard let ctx = CGContext(data: nil, width: Int(size.width * s), height: Int(size.height * s), bitsPerComponent: 8,
+                              bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    ctx.scaleBy(x: s, y: s)
+    ctx.translateBy(x: 0, y: size.height)
+    ctx.scaleBy(x: 1, y: -1)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+    body()
+    NSGraphicsContext.restoreGraphicsState()
+    return ctx.makeImage()
+}
+
+let alphabet = Array("fjdkslaghrueiwoqptyvncmxbz")
+
+/// 화면에 라벨을 붙인 그림 (typed: 이미 친 글자, 맞는 라벨만 남긴다)
+func drawLabels(_ m: MockScreen, size: CGSize, typed: String = "") {
+    let labels = LabelMaker.make(count: m.targets.count, alphabet: alphabet)
+    let big = NSFont.monospacedSystemFont(ofSize: 15, weight: .bold)
+    for (label, r) in zip(labels, m.targets) where label.hasPrefix(typed) {
+        Draw.pill(label.uppercased(), typedCount: typed.count, center: CGPoint(x: r.midX, y: r.midY),
+                  within: CGRect(origin: .zero, size: size), font: typed.isEmpty ? Draw.font : big)
+    }
+}
+
+func labelFor(_ target: CGRect, in m: MockScreen) -> String {
+    let labels = LabelMaker.make(count: m.targets.count, alphabet: alphabet)
+    return m.targets.firstIndex(of: target).map { labels[$0] } ?? ""
+}
+
+do {
+    for (name, size, draw) in [("vscode-labels", CodeMock.size, { CodeMock.draw() }),
+                               ("slack-labels", SlackMock.size, { SlackMock.draw(SlackState()) })] as [(String, CGSize, () -> MockScreen)] {
+        var screen = MockScreen()
+        let bg = renderBackground(size: size) { screen = draw() }!
+        let source = GlassSource(ScreenSnapshot(image: bg, axFrame: CGRect(origin: .zero, size: size))!)
+        savePNG(name, size: size) {
+            drawBackground(bg, size)
+            Draw.glassSource = source
+            drawLabels(screen, size: size)
+            Draw.glassSource = nil
+        }
+    }
+}
+
+/// 아래쪽 자막: 누른 키(키캡)와 설명
+func caption(_ keys: String, _ text: String, size: CGSize) {
+    let font = NSFont.systemFont(ofSize: 15, weight: .medium)
+    let keyFont = NSFont.monospacedSystemFont(ofSize: 15, weight: .bold)
+    let t = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.white])
+    let k = NSAttributedString(string: keys, attributes: [.font: keyFont, .foregroundColor: NSColor.black])
+    let keyW = keys.isEmpty ? 0 : k.size().width + 18
+    let w = t.size().width + keyW + (keys.isEmpty ? 32 : 44)
+    let bar = CGRect(x: (size.width - w) / 2, y: size.height - 58, width: w, height: 40)
+    fill(bar, NSColor(white: 0, alpha: 0.72), radius: 20)
+    var x = bar.minX + 16
+    if !keys.isEmpty {
+        let cap = CGRect(x: x, y: bar.minY + 8, width: keyW, height: 24)
+        fill(cap, NSColor(white: 0.95, alpha: 1), radius: 6)
+        k.draw(at: CGPoint(x: cap.minX + 9, y: cap.minY + 3))
+        x = cap.maxX + 12
+    }
+    t.draw(at: CGPoint(x: x, y: bar.minY + 10))
+}
+
+enum SlackMode {
+    case none
+    case scroll(Int)
+    case labels(String)
+    case clicked(CGRect)
+}
+
+/// 시각 t(초)의 장면: 화면 상태, 모드, 자막
+func slackScene(_ t: Double) -> (SlackState, SlackMode, String, String) {
+    func ease(_ x: Double) -> CGFloat { CGFloat(x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x)) }
+    func ramp(_ a: Double, _ b: Double) -> CGFloat { ease((t - a) / (b - a)) }
+    var st = SlackState()
+    st.messagesOffset = 140 * ramp(2.0, 3.4) + 134 * ramp(3.5, 3.8)
+    st.threadOffset = 240 * ramp(5.0, 6.2)
+    st.channelsOffset = 110 * ramp(7.0, 8.2) - 110 * ramp(8.4, 8.7)
+    switch t {
+    case ..<1.0: return (st, .none, "", "Slack — 채널 목록 · 메시지 · 스레드, 스크롤 영역이 세 곳")
+    case ..<2.0: return (st, .scroll(1), "⇧⌘J", "스크롤 모드 — 영역마다 번호, 메시지(2)에서 시작")
+    case ..<3.45: return (st, .scroll(1), "j", "누르는 동안 부드럽게 아래로")
+    case ..<4.2: return (st, .scroll(1), "d", "반 페이지 아래로")
+    case ..<5.0: return (st, .scroll(2), "3", "스레드로 옮기기")
+    case ..<6.3: return (st, .scroll(2), "j", "스레드 아래로")
+    case ..<7.0: return (st, .scroll(0), "1", "채널 목록으로 옮기기")
+    case ..<8.3: return (st, .scroll(0), "j", "채널 목록 아래로")
+    case ..<9.1: return (st, .scroll(0), "gg", "맨 위로")
+    case ..<9.7: return (st, .none, "Esc", "스크롤 모드 닫기")
+    case ..<11.0: return (st, .labels(""), "⌥Space", "라벨 모드 — 누를 수 있는 곳마다 라벨")
+    default:
+        return (st, .labels(""), "", "")  // 11초 뒤는 아래에서 라벨 입력·클릭 장면으로 채운다
+    }
+}
+
+do {
+    let size = SlackMock.size, vs: CGFloat = 1.5, fps: Int32 = 30, total = 13.6
+    let url = URL(fileURLWithPath: "\(outDir)/../videos/slack-scroll.mp4")
+    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    guard let video = VideoWriter(url: url, width: Int(size.width * vs), height: Int(size.height * vs), fps: fps) else {
+        fatalError("동영상을 만들 수 없음")
+    }
+    // #design 채널 라벨 (라벨 모드에서 칠 글자)
+    var screenAtLabels = MockScreen()
+    _ = render(size: size, scale: 1) { screenAtLabels = SlackMock.draw(slackScene(10).0) }
+    let designRect = screenAtLabels.named["design"] ?? .zero
+    let designLabel = labelFor(designRect, in: screenAtLabels)
+    var poster: CGImage?
+    for f in 0..<Int(total * Double(fps)) {
+        let t = Double(f) / Double(fps)
+        var (st, mode, keys, text) = slackScene(t)
+        if t >= 11.0 {
+            // 첫 글자 → 둘째 글자(누름) → #design 이 열린다
+            if t < 11.9 {
+                mode = .labels(String(designLabel.prefix(1)))
+                keys = String(designLabel.prefix(1)).uppercased()
+                text = "첫 글자 — 맞는 라벨만 크게 남는다"
+            } else if t < 12.5 {
+                mode = .clicked(designRect)
+                keys = designLabel.uppercased()
+                text = "둘째 글자 — #design 을 누른다"
+            } else {
+                st.channel = "design"
+                mode = .none
+                keys = ""
+                text = "마우스 없이 채널 이동 · 세 영역 스크롤 · 클릭까지 키보드로"
+            }
+        }
+        var screen = MockScreen()
+        guard let bg = render(size: size, scale: vs, { screen = SlackMock.draw(st) }) else { continue }
+        let source = GlassSource(ScreenSnapshot(image: bg, axFrame: CGRect(origin: .zero, size: size))!)
+        let frame = render(size: size, scale: vs) {
+            drawBackground(bg, size)
+            Draw.glassSource = source
+            switch mode {
+            case .none:
+                break
+            case .scroll(let selected):
+                let color = Config.scrollBorderColor
+                for (i, a) in screen.areas.enumerated() where i != selected {
+                    Draw.glassArea(a, selected: screen.areas[selected], color: color, fillOpacity: 0.12,
+                                   edge: Draw.glassAreaEdge(a, color: color, fillOpacity: 0.12, bezel: Draw.slabBezel(3)))
+                }
+                Draw.glassRing(screen.areas[selected], color: color, band: Draw.ringBand(3))
+                for (i, a) in screen.areas.enumerated() {
+                    Draw.pill("\(i + 1)", typedCount: i == selected ? 0 : 1, center: CGPoint(x: a.minX + 14, y: a.minY + 12),
+                              within: CGRect(origin: .zero, size: size))
+                }
+            case .labels(let typed):
+                drawLabels(screen, size: size, typed: typed)
+            case .clicked(let r):
+                let path = NSBezierPath(roundedRect: r.insetBy(dx: -6, dy: -3), xRadius: 6, yRadius: 6)
+                Config.scrollBorderColor.setStroke()
+                path.lineWidth = 3
+                path.stroke()
+            }
+            Draw.glassSource = nil
+            caption(keys, text, size: size)
+        }
+        if let frame {
+            video.append(frame)
+            if poster == nil, t >= 1.5 { poster = frame }
+        }
+    }
+    video.finish()
+    print("만듦: \(url.standardizedFileURL.path)")
+    // 미리보기 그림: 스크롤 모드 장면 + 재생 단추
+    if let poster {
+        savePNG("slack-scroll", size: size) {
+            NSImage(cgImage: poster, size: size).draw(in: CGRect(origin: .zero, size: size), from: .zero, operation: .copy,
+                                                      fraction: 1, respectFlipped: true, hints: nil)
+            let c = CGRect(x: size.width / 2 - 44, y: size.height / 2 - 44, width: 88, height: 88)
+            fill(c, NSColor(white: 0, alpha: 0.55), radius: 44)
+            let tri = NSBezierPath()
+            tri.move(to: CGPoint(x: c.minX + 34, y: c.minY + 24))
+            tri.line(to: CGPoint(x: c.minX + 34, y: c.maxY - 24))
+            tri.line(to: CGPoint(x: c.maxX - 24, y: c.midY))
+            tri.close()
+            NSColor.white.setFill()
+            tri.fill()
+        }
+    }
 }
