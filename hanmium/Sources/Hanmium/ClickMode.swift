@@ -28,7 +28,7 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
         self.labels = LabelMaker.make(count: targets.count, alphabet: alphabet)
         self.alphabet = Set(alphabet)
         self.kind = kind
-        self.overlay = Overlay(keyScreen: screen)
+        self.overlay = Overlay(keyScreen: screen, fades: Config.labelAnimation)
     }
 
     func start() {
@@ -98,7 +98,7 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
             return
         }
         typed = next
-        // 라벨 길이가 모두 같아서 완전히 일치하면 후보는 하나뿐이다
+        // 어느 라벨도 다른 라벨의 접두사가 아니어서 완전히 일치하면 후보는 하나뿐이다
         if matches.count == 1, labels[matches[0]] == next {
             click(targets[matches[0]], modifiers: event.modifierFlags)
             return
@@ -252,25 +252,18 @@ final class SearchField: NSTextField {
 }
 
 enum LabelMaker {
-    /// 같은 길이의 라벨 n 개. 길이가 같으니 어느 라벨도 다른 라벨의 접두사가 아니다.
-    /// 첫 글자가 가장 빨리 바뀌도록 만들어서 첫 타에 후보가 고르게 줄어든다.
+    /// Vimium 과 같은 방식으로 라벨 n 개를 만든다. 라벨이 적으면 모두 한 글자이고, 모자라면 앞 글자부터
+    /// 두 글자(더 모자라면 세 글자)로 늘린다. 늘린 글자는 한 글자 라벨로 쓰지 않으므로 어느 라벨도
+    /// 다른 라벨의 접두사가 아니다 — 완전히 일치하면 곧 하나뿐이다.
     static func make(count n: Int, alphabet: [Character]) -> [String] {
-        let k = alphabet.count
-        guard n > 0, k > 1 else { return [] }
-        var length = 1
-        var capacity = k
-        while capacity < n {
-            length += 1
-            capacity *= k
+        guard n > 0, alphabet.count > 1 else { return [] }
+        var hints = [""]
+        var offset = 0
+        while hints.count - offset < n || hints.count == 1 {
+            let hint = hints[offset]
+            offset += 1
+            for c in alphabet { hints.append(String(c) + hint) }
         }
-        return (0..<n).map { i in
-            var x = i
-            var chars: [Character] = []
-            for _ in 0..<length {
-                chars.append(alphabet[x % k])
-                x /= k
-            }
-            return String(chars)
-        }
+        return hints[offset..<offset + n].sorted().map { String($0.reversed()) }
     }
 }

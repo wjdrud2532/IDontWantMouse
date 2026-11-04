@@ -79,6 +79,7 @@ struct SettingsView: View {
     @AppStorage(ModeKind.search.hotkeyKey, store: Config.defaults) private var searchKey = ModeKind.search.defaultHotkey
     @AppStorage(ModeKind.scroll.hotkeyKey, store: Config.defaults) private var scrollKey = ModeKind.scroll.defaultHotkey
     @AppStorage("labelCharacters", store: Config.defaults) private var labelCharacters = Config.defaultLabelCharacters
+    @AppStorage("labelAnimation", store: Config.defaults) private var labelAnimation = false
     @AppStorage("scrollKeys", store: Config.defaults) private var scrollKeys = Config.defaultScrollKeys
     @AppStorage("scrollPxPerMs", store: Config.defaults) private var scrollSpeed = Config.defaultScrollPxPerMs
     @AppStorage("dashMultiplier", store: Config.defaults) private var dashMultiplier = Config.defaultDashMultiplier
@@ -169,7 +170,10 @@ struct SettingsView: View {
             }
             Section("라벨 클릭") {
                 TextField("라벨 문자", text: $labelCharacters)
-                note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요.")
+                note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요. 기본값은 Vimium 과 같은 sadfjklewcmpgh 입니다. "
+                    + "라벨이 적으면 한 글자, 많으면 일부만 두 글자가 됩니다.")
+                Toggle("라벨이 닫힐 때 서서히 사라지기", isOn: $labelAnimation)
+                note("끄면 라벨을 고르거나 Esc 를 누르는 즉시 사라집니다.")
                 VStack(alignment: .leading, spacing: 8) {
                     Text("라벨 색상")
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 4)], alignment: .leading, spacing: 6) {
@@ -436,6 +440,7 @@ struct SettingsView: View {
         searchKey = ModeKind.search.defaultHotkey
         scrollKey = ModeKind.scroll.defaultHotkey
         labelCharacters = Config.defaultLabelCharacters
+        labelAnimation = false
         scrollKeys = Config.defaultScrollKeys
         scrollSpeed = Config.defaultScrollPxPerMs
         dashMultiplier = Config.defaultDashMultiplier

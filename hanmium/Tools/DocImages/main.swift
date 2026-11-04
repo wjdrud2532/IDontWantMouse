@@ -99,7 +99,7 @@ do {
         }
     }!
     let source = GlassSource(ScreenSnapshot(image: bg, axFrame: CGRect(origin: .zero, size: size))!)
-    let labels = LabelMaker.make(count: targets.count, alphabet: Array("fjdkslaghrueiwoqptyvncmxbz"))
+    let labels = LabelMaker.make(count: targets.count, alphabet: Array(Config.defaultLabelCharacters))
     savePNG("labels", size: size) {
         drawBackground(bg, size)
         Draw.glassSource = source
@@ -266,7 +266,7 @@ func render(size: CGSize, scale s: CGFloat, _ body: () -> Void) -> CGImage? {
     return ctx.makeImage()
 }
 
-let alphabet = Array("fjdkslaghrueiwoqptyvncmxbz")
+let alphabet = Array(Config.defaultLabelCharacters)
 
 /// 화면에 라벨을 붙인 그림 (typed: 이미 친 글자, 맞는 라벨만 남긴다)
 func drawLabels(_ m: MockScreen, size: CGSize, typed: String = "") {

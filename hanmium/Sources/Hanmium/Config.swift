@@ -69,7 +69,8 @@ enum Config {
     /// 빌드한 실행 파일을 바로 실행할 때만 이름을 지정해서 같은 설정을 쓴다.
     static let defaults = Bundle.main.bundleIdentifier == "com.local.Hanmium"
         ? UserDefaults.standard : UserDefaults(suiteName: "com.local.Hanmium") ?? .standard
-    static let defaultLabelCharacters = "fjdkslaghrueiwoqptyvncmxbz"
+    /// Vimium 의 기본 라벨 문자(linkHintCharacters)와 같다
+    static let defaultLabelCharacters = "sadfjklewcmpgh"
     static let defaultScrollKeys = "hjkl"
     static let defaultScrollPxPerMs = 1.2
     static let defaultDashMultiplier = 3.0
@@ -118,6 +119,9 @@ enum Config {
     }
 
     /// 스크롤 움직임 애니메이션 배율. 0 이면 끔(바로 이동), 1 이 기본, 2 는 두 배로 느긋하게.
+    /// 라벨이 닫힐 때 서서히 사라지게 할지 (macOS 기본 창 효과, 약 0.2초). 끄면 바로 사라진다.
+    static var labelAnimation: Bool { defaults.bool(forKey: "labelAnimation") }
+
     static var animationScale: Double {
         min(max(defaults.object(forKey: "animationScale") as? Double ?? 1, 0), 2)
     }
@@ -205,7 +209,7 @@ enum SettingsTransfer {
     static let keys: [String] = [
         "enabled", "appFilterMode", "appList",
         "clickHotkey", "searchHotkey", "scrollHotkey", "clickEnabled", "searchEnabled", "scrollEnabled",
-        "labelCharacters", "labelTheme", "glassRefraction", "glassSpecular", "glassBlur", "glassTint",
+        "labelCharacters", "labelAnimation", "labelTheme", "glassRefraction", "glassSpecular", "glassBlur", "glassTint",
         "useSearchPredicate",
         "scrollKeys", "scrollPxPerMs", "dashMultiplier", "animationScale", "terminalNotchLines",
         "scrollBorderShown", "scrollBorderStyle", "scrollBorderWidth", "scrollBorderColor",

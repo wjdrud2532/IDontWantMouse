@@ -85,12 +85,24 @@ final class TreeBuilder {
         AXEnabler.enable(app: app, pid: pid, bundleID: bundleID)
         profile.mark("AX 켜기")
 
-        // 메뉴가 열려 있으면 메뉴 항목만 대상으로 한다
-        let menus = openMenus()
-        profile.mark("열린 메뉴 확인")
-        if !menus.isEmpty {
-            for menu in menus { walk(menu, clip: screenBounds, depth: 0, owner: nil) }
-            return Snapshot(elements: targets, anchor: nil)
+        // 열린 메뉴 확인과 창 밖 대상(앱 메뉴 막대·상태 아이콘·Dock)은 창 훑기와 따로 물을 수 있어서 동시에 한다.
+        // 차례로 하면 기다린 시간이 모두 더해졌다(창 40ms + 상태 아이콘 30ms + …). 상태 아이콘·Dock 은 다른 프로세스다.
+        let side = SideTargets()
+        let group = DispatchGroup()
+        let lane = DispatchQueue.global(qos: .userInteractive)
+        lane.async(group: group) { side.menus = self.openMenus() }
+        lane.async(group: group) {
+            if let bar = AX.element(AX.copy(self.app, kAXMenuBarAttribute)) {
+                side.menuBar = Self.fetchAll(AX.elements(AX.copy(bar, kAXChildrenAttribute)), clip: self.screenBounds)
+            }
+        }
+        lane.async(group: group) { side.extras = Self.fetchAll(self.menubarExtras(), clip: self.screenBounds) }
+        if let dockPid {
+            lane.async(group: group) {
+                let dock = AXUIElementCreateApplication(dockPid)
+                let items = AX.elements(AX.copy(dock, kAXChildrenAttribute)).flatMap { AX.elements(AX.copy($0, kAXChildrenAttribute)) }
+                side.dock = Self.fetchAll(items, clip: self.screenBounds)
+            }
         }
 
         var snap = Snapshot()
@@ -107,21 +119,44 @@ final class TreeBuilder {
                 profile.mark("WezTerm 패널")
             }
         }
-        if let bar = AX.element(AX.copy(app, kAXMenuBarAttribute)) {
-            addFlat(AX.elements(AX.copy(bar, kAXChildrenAttribute)))
+        group.wait()
+        profile.mark("메뉴 막대·상태 아이콘·Dock 기다림")
+        // 메뉴가 열려 있으면 메뉴 항목만 대상으로 한다 (드물어서 창은 미리 훑어 두고 버린다)
+        if !side.menus.isEmpty {
+            targets = []
+            seenFrames = []
+            for menu in side.menus { walk(menu, clip: screenBounds, depth: 0, owner: nil) }
+            return Snapshot(elements: targets, anchor: nil)
         }
-        profile.mark("앱 메뉴 막대")
-        addFlat(menubarExtras())
-        profile.mark("상태 아이콘(\(extraPids.count)개 앱)")
-        if let dockPid {
-            let dock = AXUIElementCreateApplication(dockPid)
-            for list in AX.elements(AX.copy(dock, kAXChildrenAttribute)) {
-                addFlat(AX.elements(AX.copy(list, kAXChildrenAttribute)))
-            }
-        }
-        profile.mark("Dock")
+        for e in side.menuBar + side.extras + side.dock where isTarget(e, insideTarget: true) { add(e) }
         snap.elements = targets
         return snap
+    }
+
+    /// 창 훑기와 동시에 모으는 창 밖 대상. 각 칸은 한 갈래만 쓰고, 읽는 건 group.wait() 뒤다.
+    private final class SideTargets {
+        var menus: [AXUIElement] = []
+        var menuBar: [Element] = []
+        var extras: [Element] = []
+        var dock: [Element] = []
+    }
+
+    /// 요소 여러 개의 속성을 몇 갈래로 나눠 동시에 묻는다. 하나씩 물으면 왕복 시간이 쌓인다
+    /// (웹 화면 요소 100개: 차례로 11–20ms → 4갈래 5–6ms). 순서는 그대로 둔다.
+    static func fetchAll(_ refs: [AXUIElement], clip: CGRect) -> [Element] {
+        guard refs.count > 12 else { return refs.compactMap { Element.fetch($0, clip: clip) } }
+        let lanes = 4
+        var out = [Element?](repeating: nil, count: refs.count)
+        out.withUnsafeMutableBufferPointer { buf in
+            DispatchQueue.concurrentPerform(iterations: lanes) { lane in
+                var i = lane
+                while i < refs.count {
+                    buf[i] = Element.fetch(refs[i], clip: clip)
+                    i += lanes
+                }
+            }
+        }
+        return out.compactMap { $0 }
     }
 
     private func walk(_ ref: AXUIElement, clip: CGRect, depth: Int, owner: Element?) {
@@ -150,10 +185,8 @@ final class TreeBuilder {
         if hasFrame && Self.clippingRoles.contains(role) { childClip = clip.intersection(e.frame) }
 
         if role == "AXWebArea", Config.useSearchPredicate, let found = searchWebArea(ref) {
-            for r in found {
-                if let w = Element.fetch(r, clip: childClip), w.enabled, w.isVisible, !Self.isWebContainer(w) {
-                    add(w)
-                }
+            for w in Self.fetchAll(found, clip: childClip) where w.enabled && w.isVisible && !Self.isWebContainer(w) {
+                add(w)
             }
             return
         }
@@ -188,12 +221,6 @@ final class TreeBuilder {
         }
         targets.append(e)
         return true
-    }
-
-    private func addFlat(_ refs: [AXUIElement]) {
-        for ref in refs {
-            if let e = Element.fetch(ref, clip: screenBounds), isTarget(e, insideTarget: true) { add(e) }
-        }
     }
 
     private func children(_ ref: AXUIElement, role: String) -> [AXUIElement] {

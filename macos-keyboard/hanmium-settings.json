@@ -10,7 +10,8 @@
     "glassSpecular" : 2,
     "glassTint" : 0.10000000000000001,
     "inactiveFillOpacity" : 0.20000000000000001,
-    "labelCharacters" : "fjdkslaghrueiwoqptyvncmxbz",
+    "labelAnimation" : false,
+    "labelCharacters" : "sadfjklewcmpgh",
     "labelTheme" : "glass",
     "scrollBorderColor" : ""
   },

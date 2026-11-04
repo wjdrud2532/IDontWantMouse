@@ -18,11 +18,13 @@ final class Overlay {
     /// 창 번호가 있으면 그 창 바로 위에 끼워 넣어서, 다른 앱 창이 덮으면 같이 가려진다(스크롤 테두리).
     private var stackedAbove: CGWindowID?
 
-    init(keyScreen: NSScreen, stackedAbove: CGWindowID? = nil) {
+    /// fades: 닫을 때 macOS 기본 효과로 서서히 사라진다(약 0.2초). false 면 바로 사라진다.
+    init(keyScreen: NSScreen, stackedAbove: CGWindowID? = nil, fades: Bool = true) {
         self.stackedAbove = stackedAbove
         let glass = Config.labelTheme.glass
         for screen in NSScreen.screens {
             let panel = OverlayPanel(screen: screen)
+            if !fades { panel.animationBehavior = .none }
             if stackedAbove != nil { panel.level = .normal }
             let canvas = CanvasView(frame: NSRect(origin: .zero, size: screen.frame.size),
                                     axOrigin: Screens.axFrame(screen).origin)
