@@ -68,6 +68,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 struct SettingsView: View {
     let onHotkeysChanged: () -> Void
     let onRecording: (Bool) -> Void
+    /// 창 높이. 문서 이미지를 만들 때(Tools/DocImages)만 늘려서 모든 항목을 한 장에 담는다.
+    static var height: CGFloat = 620
 
     @AppStorage("enabled", store: Config.defaults) private var enabled = true
     @AppStorage(ModeKind.labels.enabledKey, store: Config.defaults) private var labelsOn = true
@@ -312,7 +314,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 620)
+        .frame(width: 460, height: Self.height)
         .onChange(of: enabled) { _ in onHotkeysChanged() }
         .onChange(of: labelsOn) { _ in onHotkeysChanged() }
         .onChange(of: searchOn) { _ in onHotkeysChanged() }
