@@ -1,5 +1,4 @@
 import AppKit
-import AVFoundation
 
 // README 용 가짜 화면: VS Code·Slack 과 비슷한 화면을 지어낸 내용으로 그린다(실제 화면·대화·코드가 아님).
 // 그리기는 위가 0 인 좌표(포인트)로 하고, 라벨을 붙일 자리(targets)와 스크롤 영역(areas)을 함께 돌려준다.
@@ -343,60 +342,5 @@ enum CodeMock {
             ex -= 18
         }
         return m
-    }
-}
-
-// MARK: - 동영상
-
-final class VideoWriter {
-    private let writer: AVAssetWriter
-    private let input: AVAssetWriterInput
-    private let adaptor: AVAssetWriterInputPixelBufferAdaptor
-    let width: Int, height: Int, fps: Int32
-    private var frame: Int64 = 0
-
-    init?(url: URL, width: Int, height: Int, fps: Int32) {
-        try? FileManager.default.removeItem(at: url)
-        guard let w = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return nil }
-        writer = w
-        self.width = width
-        self.height = height
-        self.fps = fps
-        input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 2_500_000,
-                                              AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel],
-        ])
-        input.expectsMediaDataInRealTime = false
-        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
-        ])
-        writer.add(input)
-        writer.startWriting()
-        writer.startSession(atSourceTime: .zero)
-    }
-
-    func append(_ image: CGImage) {
-        while !input.isReadyForMoreMediaData { usleep(2000) }
-        var pb: CVPixelBuffer?
-        guard let pool = adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb) == kCVReturnSuccess, let pb
-        else { return }
-        CVPixelBufferLockBaseAddress(pb, [])
-        if let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: width, height: height, bitsPerComponent: 8,
-                               bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                               bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) {
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        CVPixelBufferUnlockBaseAddress(pb, [])
-        adaptor.append(pb, withPresentationTime: CMTime(value: frame, timescale: fps))
-        frame += 1
-    }
-
-    func finish() {
-        input.markAsFinished()
-        let done = DispatchSemaphore(value: 0)
-        writer.finishWriting { done.signal() }
-        done.wait()
     }
 }

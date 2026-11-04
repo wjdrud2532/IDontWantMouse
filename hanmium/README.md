@@ -8,12 +8,12 @@
 |---|---|
 | ![VS Code 의 탭·파일·버튼마다 붙은 라벨](docs/images/vscode-labels.png) | ![Slack 의 채널·메시지·버튼마다 붙은 라벨](docs/images/slack-labels.png) |
 
-[![Slack 다중 스크롤 동영상 — 누르면 재생](docs/images/slack-scroll.png)](docs/videos/slack-scroll.mp4)
+![Slack 다중 스크롤 — 키보드만으로 채널 목록·메시지·스레드를 오가며 스크롤하고 라벨로 채널을 연다](docs/images/slack-scroll.gif)
 
-▶ **다중 스크롤 (13초 동영상, 그림을 누르면 열린다)** — Slack 의 채널 목록·메시지·스레드 세 스크롤 영역을
-키보드만으로 오가며 스크롤하고, 라벨로 다른 채널을 연다. 단계는 [아래 예시](#예시-slack-을-키보드만으로)에 있다.
+**다중 스크롤** (13초, 반복 재생) — Slack 의 채널 목록·메시지·스레드 세 스크롤 영역을 키보드만으로 오가며
+스크롤하고, 라벨로 다른 채널을 연다. 단계는 [아래 예시](#예시-slack-을-키보드만으로)에 있다.
 
-> VS Code·Slack 그림과 동영상은 실제 화면이 아니다. 지어낸 내용으로 비슷한 화면을 그리고 그 위에
+> VS Code·Slack 그림과 움직이는 그림은 실제 화면이 아니다. 지어낸 내용으로 비슷한 화면을 그리고 그 위에
 > Hanmium 의 라벨·테두리 그리기 코드를 그대로 써서 만들었다(`Tools/make-doc-images.sh`).
 
 키보드만으로 화면의 버튼·링크를 누르고, 글자로 찾고, 스크롤하는 macOS 메뉴 막대 앱(Swift).
@@ -158,7 +158,7 @@ open build/Hanmium.app
 
 Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알려주지 않는다. Hanmium 은 웹 화면 공통 규칙으로
 **채널 목록(1)·메시지(2)·스레드(3)** 를 각각 스크롤 영역으로 찾는다. 그래서 세 곳을 키보드만으로 오갈 수 있다.
-[동영상](docs/videos/slack-scroll.mp4) 의 순서 그대로다.
+맨 위 움직이는 그림의 순서 그대로다.
 
 | 순서 | 키 | 하는 일 |
 |---|---|---|
@@ -254,4 +254,4 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `Demos/` | 기능을 넣기 전에 비교해 본 예시 앱 (`Demos/build.sh DropletDemo`, `LinkLabelsDemo`) |
 | `Tools/` | 회귀 테스트, README 이미지 만들기(`make-doc-images.sh`) |
 
-README 의 이미지와 동영상은 `Tools/make-doc-images.sh` 로 다시 만든다. 실제 화면을 찍지 않는다. Hanmium 의 그리기 코드로 지어낸 내용의 비슷한 화면(웹 페이지, VS Code, Slack, 터미널)과 설정 창을 화면 밖에서 그린다. Dock 그림만 실제 화면이다.
+README 의 이미지와 움직이는 그림(GIF)은 `Tools/make-doc-images.sh` 로 다시 만든다. 실제 화면을 찍지 않는다. Hanmium 의 그리기 코드로 지어낸 내용의 비슷한 화면(웹 페이지, VS Code, Slack, 터미널)과 설정 창을 화면 밖에서 그린다. Dock 그림만 실제 화면이다.

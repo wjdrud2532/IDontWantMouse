@@ -250,7 +250,7 @@ MainActor.assumeIsolated {
     print("만듦: \(outDir)/settings.png")
 }
 
-// MARK: 6~8. VS Code·Slack 라벨, Slack 다중 스크롤 동영상 (지어낸 내용의 비슷한 화면)
+// MARK: 6~8. VS Code·Slack 라벨, Slack 다중 스크롤 움직이는 그림 (지어낸 내용의 비슷한 화면)
 
 func render(size: CGSize, scale s: CGFloat, _ body: () -> Void) -> CGImage? {
     guard let ctx = CGContext(data: nil, width: Int(size.width * s), height: Int(size.height * s), bitsPerComponent: 8,
@@ -350,21 +350,22 @@ func slackScene(_ t: Double) -> (SlackState, SlackMode, String, String) {
     }
 }
 
-do {
-    let size = SlackMock.size, vs: CGFloat = 1.5, fps: Int32 = 30, total = 13.6
-    let url = URL(fileURLWithPath: "\(outDir)/../videos/slack-scroll.mp4")
-    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    guard let video = VideoWriter(url: url, width: Int(size.width * vs), height: Int(size.height * vs), fps: fps) else {
-        fatalError("동영상을 만들 수 없음")
+/// Slack 다중 스크롤 장면 하나를 그린다 (t 초, scale 배)
+final class SlackClip {
+    let size = SlackMock.size
+    let total = 13.6
+    private let designRect: CGRect
+    private let designLabel: String
+
+    init() {
+        // #design 채널 라벨 (라벨 모드에서 칠 글자)
+        var screen = MockScreen()
+        _ = render(size: SlackMock.size, scale: 1) { screen = SlackMock.draw(slackScene(10).0) }
+        designRect = screen.named["design"] ?? .zero
+        designLabel = labelFor(designRect, in: screen)
     }
-    // #design 채널 라벨 (라벨 모드에서 칠 글자)
-    var screenAtLabels = MockScreen()
-    _ = render(size: size, scale: 1) { screenAtLabels = SlackMock.draw(slackScene(10).0) }
-    let designRect = screenAtLabels.named["design"] ?? .zero
-    let designLabel = labelFor(designRect, in: screenAtLabels)
-    var poster: CGImage?
-    for f in 0..<Int(total * Double(fps)) {
-        let t = Double(f) / Double(fps)
+
+    func frame(at t: Double, scale s: CGFloat) -> CGImage? {
         var (st, mode, keys, text) = slackScene(t)
         if t >= 11.0 {
             // 첫 글자 → 둘째 글자(누름) → #design 이 열린다
@@ -384,9 +385,10 @@ do {
             }
         }
         var screen = MockScreen()
-        guard let bg = render(size: size, scale: vs, { screen = SlackMock.draw(st) }) else { continue }
-        let source = GlassSource(ScreenSnapshot(image: bg, axFrame: CGRect(origin: .zero, size: size))!)
-        let frame = render(size: size, scale: vs) {
+        guard let bg = render(size: size, scale: s, { screen = SlackMock.draw(st) }),
+              let snap = ScreenSnapshot(image: bg, axFrame: CGRect(origin: .zero, size: size)) else { return nil }
+        let source = GlassSource(snap)
+        return render(size: size, scale: s) {
             drawBackground(bg, size)
             Draw.glassSource = source
             switch mode {
@@ -414,27 +416,37 @@ do {
             Draw.glassSource = nil
             caption(keys, text, size: size)
         }
-        if let frame {
-            video.append(frame)
-            if poster == nil, t >= 1.5 { poster = frame }
+    }
+}
+
+// GitHub README 는 저장소에 넣은 동영상을 본문에서 재생하지 못해서, 그 자리에서 움직이는 GIF 로 만든다.
+// 초당 10장으로 그리고, 바뀌지 않는 장면은 한 장으로 합쳐 길게 보여줘서 용량을 줄인다.
+do {
+    let clip = SlackClip()
+    let fps = 10.0
+    var frames: [(image: CGImage, delay: Double)] = []
+    var lastBytes: Data?
+    for f in 0..<Int(clip.total * fps) {
+        guard let img = clip.frame(at: Double(f) / fps, scale: 1),
+              let bytes = img.dataProvider?.data as Data? else { continue }
+        if bytes == lastBytes, !frames.isEmpty {
+            frames[frames.count - 1].delay += 1 / fps
+        } else {
+            frames.append((img, 1 / fps))
+            lastBytes = bytes
         }
     }
-    video.finish()
-    print("만듦: \(url.standardizedFileURL.path)")
-    // 미리보기 그림: 스크롤 모드 장면 + 재생 단추
-    if let poster {
-        savePNG("slack-scroll", size: size) {
-            NSImage(cgImage: poster, size: size).draw(in: CGRect(origin: .zero, size: size), from: .zero, operation: .copy,
-                                                      fraction: 1, respectFlipped: true, hints: nil)
-            let c = CGRect(x: size.width / 2 - 44, y: size.height / 2 - 44, width: 88, height: 88)
-            fill(c, NSColor(white: 0, alpha: 0.55), radius: 44)
-            let tri = NSBezierPath()
-            tri.move(to: CGPoint(x: c.minX + 34, y: c.minY + 24))
-            tri.line(to: CGPoint(x: c.minX + 34, y: c.maxY - 24))
-            tri.line(to: CGPoint(x: c.maxX - 24, y: c.midY))
-            tri.close()
-            NSColor.white.setFill()
-            tri.fill()
-        }
+    let url = URL(fileURLWithPath: "\(outDir)/slack-scroll.gif")
+    guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "com.compuserve.gif" as CFString, frames.count, nil) else {
+        fatalError("GIF 를 만들 수 없음")
     }
+    CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+    for (img, delay) in frames {
+        CGImageDestinationAddImage(dest, img, [kCGImagePropertyGIFDictionary: [
+            kCGImagePropertyGIFDelayTime: delay, kCGImagePropertyGIFUnclampedDelayTime: delay,
+        ]] as CFDictionary)
+    }
+    CGImageDestinationFinalize(dest)
+    let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    print("만듦: \(url.path) (장면 \(frames.count)개, \(bytes / 1024)KB)")
 }
