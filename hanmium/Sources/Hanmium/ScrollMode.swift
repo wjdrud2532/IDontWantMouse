@@ -57,6 +57,15 @@ final class ScrollMode: Mode {
     /// 고르지 않은 영역마다 그려 둔 유리판 굴절 가장자리. 그 영역을 다시 고르면 지운다.
     private var slabEdges: [Int: (image: CGImage, frame: CGRect)] = [:]
     private var motionTimer: Timer?
+    /// 휠을 보낼 지점 후보 중 지금 쓰는 것(aimPoints). 보낸 뒤 내용이 움직였는지 확인될 때까지 aimConfirmed 는 false.
+    private var aimIndex = 0
+    private var aimConfirmed = false
+    /// 영역이 움직였는지 알아볼 표지와, 확인을 기다리는 동안 보낸 양·보내기 전 표지 값
+    private var probe: ScrollProbe?
+    private var probeToken = 0
+    private var checking: (sent: CGVector, before: [CGFloat?])?
+    /// 앱·영역 종류마다 실제로 스크롤된 지점 후보 번호 (다음에 열 때 그것부터 쓴다)
+    private static var aimMemory: [String: Int] = [:]
 
     init(snapshot: ScrollSnapshot, screen: NSScreen) {
         pid = snapshot.pid
@@ -228,9 +237,12 @@ final class ScrollMode: Mode {
             }
         }
         if target != nil {
-            // 커서는 그대로 두고, 영역 오른쪽 가장자리(보통 스크롤 막대 자리)로 보낸다.
-            // 본문 가운데의 표·코드 블록·임베드가 휠을 가로채지 않게.
-            scrollPoint = CGPoint(x: current.visibleFrame.maxX - 12, y: current.visibleFrame.midY)
+            // 커서는 그대로 두고 영역 안 지점으로 보낸다. 처음 보낼 때 실제로 움직였는지 확인한다(verifyAim).
+            aimIndex = Self.aimMemory[aimKey] ?? 0
+            aimConfirmed = false
+            checking = nil
+            scrollPoint = aimPoints[aimIndex]
+            findProbe()
         } else {
             aim(at: visible ?? center)
         }
@@ -522,8 +534,79 @@ final class ScrollMode: Mode {
 
     private func send(_ by: CGVector) {
         retakeGlassSoon()
-        if let target, Mouse.scroll(by: by, at: scrollPoint, to: target) { return }
+        if let target {
+            verifyAim(by)
+            if Mouse.scroll(by: by, at: scrollPoint, to: target) { return }
+        }
         Mouse.scroll(by: by, at: scrollPoint)
+    }
+
+    // MARK: - 휠 보낼 지점 확인
+
+    /// 휠을 보낼 지점 후보. 오른쪽 가장자리(보통 스크롤 막대 자리)가 먼저다: 본문 가운데의 표·코드 블록·임베드가
+    /// 휠을 가로채지 않게. 그런데 Slack 처럼 가장자리가 스크롤 상자 바깥(감싼 틀이나 자체 스크롤 막대)이면
+    /// 거기서는 스크롤되지 않으므로 오른쪽 1/4, 가운데 순서로 넘어간다.
+    private var aimPoints: [CGPoint] {
+        let f = current.visibleFrame
+        return [CGPoint(x: f.maxX - 12, y: f.midY), CGPoint(x: f.maxX - f.width / 4, y: f.midY), CGPoint(x: f.midX, y: f.midY)]
+    }
+
+    private var aimKey: String {
+        let classes = (AX.copy(current.ref, "AXDOMClassList") as? [String]) ?? []
+        return "\(bundleID ?? "")|\(current.role)|\(classes.joined(separator: " "))"
+    }
+
+    /// 표지는 AX 를 여러 번 불러 찾으므로 뒤에서 찾는다
+    private func findProbe() {
+        probe = nil
+        probeToken += 1
+        let token = probeToken, area = current
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let found = ScrollProbe.find(in: area)
+            DispatchQueue.main.async {
+                guard let self, self.probeToken == token else { return }
+                self.probe = found
+            }
+        }
+    }
+
+    /// 세로 스크롤을 보낼 때, 아직 확인되지 않은 지점이면 잠시 뒤 내용이 움직였는지 본다.
+    /// 확인을 기다리는 동안 더 보낸 양은 모아 둔다 — 안 움직였으면 다음 지점에 그만큼 다시 보낸다.
+    private func verifyAim(_ by: CGVector) {
+        guard !aimConfirmed, notch == nil, by.dx == 0, by.dy != 0, let probe else { return }
+        if checking != nil {
+            checking!.sent.dy += by.dy
+            return
+        }
+        checking = (sent: by, before: probe.read())
+        let area = index
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.checkAim(area: area) }
+    }
+
+    private func checkAim(area: Int) {
+        guard let c = checking else { return }
+        checking = nil
+        guard !stopped, area == index, let probe, let target else { return }
+        let after = probe.read()
+        if !ScrollProbe.moved(c.before, after) {
+            let points = aimPoints
+            guard aimIndex + 1 < points.count else {
+                // 어느 지점도 안 움직였다: 끝에 닿았을 수 있으니 처음 지점으로 돌아가고 다음에 다시 확인한다
+                Log.write("스크롤 지점: 어디서도 움직이지 않음 (끝일 수 있음) [\(aimKey)]")
+                aimIndex = 0
+                scrollPoint = points[0]
+                return
+            }
+            aimIndex += 1
+            scrollPoint = points[aimIndex]
+            Log.write("스크롤 지점: 안 움직여서 \(aimIndex)번 후보로 [\(aimKey)]")
+            _ = Mouse.scroll(by: c.sent, at: scrollPoint, to: target)
+            checking = (sent: c.sent, before: after)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.checkAim(area: area) }
+            return
+        }
+        aimConfirmed = true
+        Self.aimMemory[aimKey] = aimIndex
     }
 
     /// 세로 스크롤 막대 값을 0/1 로 직접 바꾸고, 안 되면 큰 휠 이벤트를 여러 번 보낸다.
@@ -589,5 +672,49 @@ enum Log {
         } else {
             try? data.write(to: url)
         }
+    }
+}
+
+/// 영역이 스크롤됐는지 알아보는 표지: 세로 스크롤 막대 값, 없으면 영역 안 작은 요소 몇 개의 위치.
+/// 위아래에 붙어 있는 머리글·입력창은 스크롤돼도 제자리라 영역 높이의 25~85% 사이에서, 높이를 나눠 하나씩 고른다.
+/// 그중 하나라도 움직이면 스크롤된 것이다 (제자리에 떠 있는 요소 하나만 보고 잘못 판단하지 않게).
+struct ScrollProbe {
+    let bar: AXUIElement?
+    let items: [AXUIElement]
+
+    /// 표지 값. 요소가 사라지면(가상 목록이 줄을 바꿔 끼움) 그 자리는 nil.
+    func read() -> [CGFloat?] {
+        if let bar { return [(AX.copy(bar, kAXValueAttribute) as? NSNumber).map { CGFloat($0.doubleValue) * 10000 }] }
+        return items.map { AX.point(AX.copy($0, kAXPositionAttribute))?.y }
+    }
+
+    static func moved(_ a: [CGFloat?], _ b: [CGFloat?]) -> Bool {
+        zip(a, b).contains { x, y in
+            guard let x, let y else { return x != nil || y != nil }
+            return abs(x - y) >= 0.5
+        }
+    }
+
+    static func find(in area: Element) -> ScrollProbe? {
+        if let bar = AX.element(AX.copy(area.ref, kAXVerticalScrollBarAttribute)) { return ScrollProbe(bar: bar, items: []) }
+        let f = area.visibleFrame
+        let bands: [ClosedRange<CGFloat>] = [0.25...0.45, 0.45...0.65, 0.65...0.85].map {
+            (f.minY + f.height * $0.lowerBound)...(f.minY + f.height * $0.upperBound)
+        }
+        var picked: [Int: AXUIElement] = [:]
+        var queue = AX.elements(AX.copy(area.ref, kAXChildrenAttribute))
+        var seen = 0
+        while !queue.isEmpty, seen < 600, picked.count < bands.count {
+            let e = queue.removeFirst()
+            seen += 1
+            let v = AX.multi(e, [kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute])
+            if let o = AX.point(v[0]), let s = AX.size(v[1]), s.height >= 8, s.height < f.height * 0.2,
+               o.x >= f.minX - 1, o.x < f.maxX,
+               let band = bands.firstIndex(where: { $0.contains(o.y) && $0.contains(o.y + s.height) }), picked[band] == nil {
+                picked[band] = e
+            }
+            queue += AX.elements(v[2])
+        }
+        return picked.isEmpty ? nil : ScrollProbe(bar: nil, items: picked.sorted { $0.key < $1.key }.map(\.value))
     }
 }
