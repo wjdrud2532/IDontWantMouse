@@ -3,7 +3,7 @@
   "settings" : {
     "animationScale" : 0.25,
     "appList" : "",
-    "focusMotion" : "none",
+    "focusMotion" : "stretch",
     "focusMotionSpeed" : 1.5,
     "glassBlur" : 2,
     "glassRefraction" : 1.1500000000000001,
@@ -13,7 +13,9 @@
     "labelAnimation" : false,
     "labelCharacters" : "sadfjklewcmpgh",
     "labelTheme" : "glass",
-    "scrollBorderColor" : ""
+    "scrollBorderColor" : "",
+    "scrollPxPerMs" : 1,
+    "terminalNotchLines" : 3
   },
   "version" : 1
 }

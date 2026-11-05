@@ -18,34 +18,16 @@ final class ScrollMode: Mode {
     private let areas: [(area: Element, window: Int)]
     private var index = 0
     /// 휠 이벤트를 보낼 위치
-    private var scrollPoint = CGPoint.zero
+    private var scrollPoint = CGPoint.zero { didSet { driver.setAim(.init(target: target, point: scrollPoint)) } }
     /// 휠 이벤트를 직접 받을 창. nil 이면 커서를 scrollPoint 로 옮겨서 보낸다.
-    private var target: Mouse.Target?
+    private var target: Mouse.Target? { didSet { driver.setAim(.init(target: target, point: scrollPoint)) } }
     private let overlay: Overlay
-    /// 누르고 있는 키 → 목표 속도(기본 속도의 배수와 방향)
-    private var held: [UInt16: CGVector] = [:]
-    /// 누르고 있는 키 → 몇 번째 누름인지. 손을 뗐다 다시 누른 것과 계속 누른 것을 가른다.
-    private var pressed: [UInt16: Int] = [:]
-    private var pressCount = 0
-    /// 지금 속도(px/ms). 목표 속도로 바로 바뀌지 않고 부드럽게 따라간다.
-    private var velocity = CGVector.zero
-    /// 가속·감속 시간 상수(ms)와 d/u 반 페이지 이동 시간. 설정의 애니메이션 배율을 곱한다(0 이면 즉시).
-    private let accelTau = 80.0 * Config.animationScale
-    private let decelTau = 60.0 * Config.animationScale
-    private let glideDuration: CFTimeInterval = 0.25 * Config.animationScale
-    /// d/u 를 이만큼 넘게 누르고 있으면 반 페이지에 이어 계속 스크롤한다
-    private static let holdDelay = 0.12
-    /// d/u 처럼 정해진 거리를 나눠 보내는 중인 스크롤. sent 는 지금까지 보낸 정수 픽셀.
-    private var glide: (total: CGVector, sent: CGVector, start: CFTimeInterval)?
-    private var timer: Timer?
-    private var lastTick: CFTimeInterval = 0
-    private var carry = CGVector.zero
+    /// 누르고 있는 키대로 화면 새로 고침마다 휠 이벤트를 보낸다
+    private let driver: ScrollDriver
     private var lastG: CFTimeInterval = 0
     private var stopped = false
-    /// WezTerm 은 전체 화면 앱(Claude Code, vim 등)에 휠 이벤트 하나를 크기와 상관없이 한 칸으로 넘긴다.
-    /// 작은 이벤트를 자주 보내면 너무 빨라지므로 픽셀을 모았다가 설정한 줄 수(15px × N)씩 보낸다.
+    /// WezTerm 은 휠 이벤트 하나를 한 칸으로 넘기므로 픽셀을 모았다가 설정한 줄 수(15px × N)씩 보낸다(ScrollDriver)
     private let notch: CGFloat?
-    private var notchCarry = CGVector.zero
     /// 번호 라벨이 유리면, 스크롤·창 전환으로 뒤 화면이 바뀐 뒤 다시 찍는다
     private let glassLabels: Bool
     private var glassRefresh: DispatchWorkItem?
@@ -73,6 +55,7 @@ final class ScrollMode: Mode {
         windows = snapshot.windows
         areas = snapshot.areas
         notch = snapshot.bundleID == WezTerm.bundleID ? CGFloat(Config.terminalNotchLines * 15) : nil
+        driver = ScrollDriver(screen: screen, notch: notch)
         // 테두리는 스크롤하는 앱의 창 바로 위에만 그려서 다른 앱 창이 덮으면 같이 가려지게 한다
         let focusedWindow = snapshot.windows.indices.contains(snapshot.focusedWindow)
             ? AX.windowID(snapshot.windows[snapshot.focusedWindow].ref) : nil
@@ -98,7 +81,8 @@ final class ScrollMode: Mode {
     func start() {
         overlay.paint = { [unowned self] rect in paint(rect) }
         overlay.onKeyDown = { [unowned self] event in keyDown(event) }
-        overlay.onKeyUp = { [unowned self] event in keyUp(event) }
+        overlay.onKeyUp = { [unowned self] event in driver.release(event.keyCode) }
+        driver.onSend = { [weak self] by, before in self?.didSend(by, before: before) }
         overlay.show()
         // 스크롤 모드 동안 뒤 화면을 계속 받아 물방울 이동·스크롤 중에도 굴절이 바로 바뀌게 한다
         if glassLabels { GlassSnapshots.startStream(excluding: overlay.windowIDs) }
@@ -112,7 +96,7 @@ final class ScrollMode: Mode {
             ScrollMemory.entries[windowID] = .init(area: current.visibleFrame, focus: focusAtStart)
             Log.write("스크롤 모드 닫힘: 창 \(windowID) 영역 \(index) 기억")
         }
-        timer?.invalidate()
+        driver.stop()
         motionTimer?.invalidate()
         glassRefresh?.cancel()
         GlassSnapshots.stopStream()
@@ -237,13 +221,16 @@ final class ScrollMode: Mode {
             }
         }
         if target != nil {
-            // 커서는 그대로 두고 영역 안 지점으로 보낸다. 처음 보낼 때 실제로 움직였는지 확인한다(verifyAim).
+            // 커서는 그대로 두고 영역 안 지점으로 보낸다. 처음 보낼 때 실제로 움직였는지 확인한다(armAimCheck).
             aimIndex = Self.aimMemory[aimKey] ?? 0
             aimConfirmed = false
             checking = nil
             scrollPoint = aimPoints[aimIndex]
             findProbe()
         } else {
+            probeToken += 1
+            probe = nil
+            armAimCheck()
             aim(at: visible ?? center)
         }
         overlay.redraw()
@@ -400,8 +387,7 @@ final class ScrollMode: Mode {
             return
         }
         if let dir = direction(for: event) {
-            held[event.keyCode] = dir
-            startTimer()
+            driver.hold(event.keyCode, dir)
             return
         }
         let shift = event.modifierFlags.contains(.shift)
@@ -420,8 +406,8 @@ final class ScrollMode: Mode {
             if let n = Int(String(c)) { select(number: n) }
         case "d", "u":
             let sign: CGFloat = c == "d" ? 1 : -1
-            glide(CGVector(dx: 0, dy: sign * half))
-            holdToContinue(event.keyCode, CGVector(dx: 0, dy: sign * Config.dashMultiplier))
+            driver.page(event.keyCode, by: CGVector(dx: 0, dy: sign * half),
+                        continuous: CGVector(dx: 0, dy: sign * Config.dashMultiplier))
         case "g" where shift: jump(toTop: false)
         case "g":
             if now - lastG < 0.5 {
@@ -432,113 +418,6 @@ final class ScrollMode: Mode {
             }
         default: break
         }
-    }
-
-    private func keyUp(_ event: NSEvent) {
-        held.removeValue(forKey: event.keyCode)
-        pressed.removeValue(forKey: event.keyCode)
-    }
-
-    /// 짧게 치면 반 페이지만, holdDelay 넘게 누르고 있으면 감속 중인 반 페이지 이동에 이어 그대로 가속한다.
-    /// 시스템 키 반복을 기다리면 반 페이지 이동이 다 끝나 한 번 멈췄다 출발하게 된다.
-    private func holdToContinue(_ keyCode: UInt16, _ continuous: CGVector) {
-        pressCount += 1
-        let press = pressCount
-        pressed[keyCode] = press
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdDelay) { [weak self] in
-            guard let self, !stopped, pressed[keyCode] == press else { return }
-            held[keyCode] = continuous
-            startTimer()
-        }
-    }
-
-    /// 정해진 거리를 glideDuration 동안 처음엔 빠르게, 끝에선 느리게 나눠 보낸다.
-    /// 아직 다 가지 않았는데 또 누르면 남은 거리에 더해 다시 시작한다.
-    private func glide(_ by: CGVector) {
-        var total = by
-        if let g = glide {
-            total.dx += g.total.dx - g.sent.dx
-            total.dy += g.total.dy - g.sent.dy
-        }
-        glide = (total, .zero, CACurrentMediaTime())
-        startTimer()
-    }
-
-    private func startTimer() {
-        guard timer == nil else { return }
-        lastTick = CACurrentMediaTime()
-        carry = .zero
-        let t = Timer(timeInterval: 1.0 / 120, repeats: true) { [unowned self] _ in tick() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
-
-    private func tick() {
-        let now = CACurrentMediaTime()
-        let dtMs = (now - lastTick) * 1000
-        lastTick = now
-
-        // 누르고 있는 키들의 목표 속도. 지금 속도는 거기로 지수적으로 다가간다(멈출 때는 조금 더 빨리).
-        var target = CGVector.zero
-        for d in held.values {
-            target.dx += d.dx
-            target.dy += d.dy
-        }
-        let speed = Config.scrollPxPerMs * (NSEvent.modifierFlags.contains(.shift) ? Config.dashMultiplier : 1)
-        target.dx *= speed
-        target.dy *= speed
-        let speeding = hypot(target.dx, target.dy) >= hypot(velocity.dx, velocity.dy)
-        let tau = speeding ? accelTau : decelTau
-        let k = tau > 0 ? 1 - exp(-dtMs / tau) : 1
-        velocity.dx += (target.dx - velocity.dx) * k
-        velocity.dy += (target.dy - velocity.dy) * k
-        if held.isEmpty && hypot(velocity.dx, velocity.dy) < 0.02 { velocity = .zero }
-        carry.dx += velocity.dx * dtMs
-        carry.dy += velocity.dy * dtMs
-        // 휠 이벤트는 정수 픽셀이라 소수점은 다음 틱으로 넘긴다
-        var step = CGVector(dx: carry.dx.rounded(.towardZero), dy: carry.dy.rounded(.towardZero))
-        carry.dx -= step.dx
-        carry.dy -= step.dy
-
-        // d/u: ease-out 곡선을 따라 이번 틱까지 가야 할 만큼
-        if var g = glide {
-            let p = glideDuration > 0 ? min(1, (now - g.start) / glideDuration) : 1
-            let eased = 1 - pow(1 - p, 2)
-            let due = CGVector(dx: (g.total.dx * eased).rounded(.towardZero),
-                               dy: (g.total.dy * eased).rounded(.towardZero))
-            step.dx += due.dx - g.sent.dx
-            step.dy += due.dy - g.sent.dy
-            g.sent = due
-            glide = p < 1 ? g : nil
-        }
-
-        if step.dx != 0 || step.dy != 0 { scroll(step) }
-        if held.isEmpty && glide == nil && velocity == .zero {
-            timer?.invalidate()
-            timer = nil
-        }
-    }
-
-    private func scroll(_ by: CGVector) {
-        guard let notch else { return send(by) }
-        notchCarry.dx += by.dx
-        notchCarry.dy += by.dy
-        let nx = Int((notchCarry.dx / notch).rounded(.towardZero))
-        let ny = Int((notchCarry.dy / notch).rounded(.towardZero))
-        notchCarry.dx -= CGFloat(nx) * notch
-        notchCarry.dy -= CGFloat(ny) * notch
-        // 한 칸씩 따로 보내야 전체 화면 앱이 칸 수만큼 움직인다
-        for _ in 0..<abs(ny) { send(CGVector(dx: 0, dy: ny > 0 ? notch : -notch)) }
-        for _ in 0..<abs(nx) { send(CGVector(dx: nx > 0 ? notch : -notch, dy: 0)) }
-    }
-
-    private func send(_ by: CGVector) {
-        retakeGlassSoon()
-        if let target {
-            verifyAim(by)
-            if Mouse.scroll(by: by, at: scrollPoint, to: target) { return }
-        }
-        Mouse.scroll(by: by, at: scrollPoint)
     }
 
     // MARK: - 휠 보낼 지점 확인
@@ -561,26 +440,38 @@ final class ScrollMode: Mode {
         probe = nil
         probeToken += 1
         let token = probeToken, area = current
+        driver.check(nil, tag: 0)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let found = ScrollProbe.find(in: area)
             DispatchQueue.main.async {
                 guard let self, self.probeToken == token else { return }
                 self.probe = found
+                self.armAimCheck()
             }
         }
     }
 
-    /// 세로 스크롤을 보낼 때, 아직 확인되지 않은 지점이면 잠시 뒤 내용이 움직였는지 본다.
-    /// 확인을 기다리는 동안 더 보낸 양은 모아 둔다 — 안 움직였으면 다음 지점에 그만큼 다시 보낸다.
-    private func verifyAim(_ by: CGVector) {
-        guard !aimConfirmed, notch == nil, by.dx == 0, by.dy != 0, let probe else { return }
-        if checking != nil {
-            checking!.sent.dy += by.dy
-            return
+    /// 아직 확인되지 않은 지점이면 다음 세로 스크롤을 보내기 직전에 표지를 읽게 해 둔다(ScrollDriver.check).
+    private func armAimCheck() {
+        guard !aimConfirmed, checking == nil, notch == nil, target != nil, let probe else {
+            return driver.check(nil, tag: 0)
         }
-        checking = (sent: by, before: probe.read())
-        let area = index
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.checkAim(area: area) }
+        driver.check(probe, tag: probeToken)
+    }
+
+    /// 보낸 양을 받는다. before 가 있으면 그 직전에 읽은 표지 값이다: 잠시 뒤 내용이 움직였는지 본다.
+    /// 확인을 기다리는 동안 더 보낸 양은 모아 둔다 — 안 움직였으면 다음 지점에 그만큼 다시 보낸다.
+    private func didSend(_ by: CGVector, before: (values: [CGFloat?], tag: Int)?) {
+        retakeGlassSoon()
+        guard !stopped else { return }
+        if let before {
+            guard before.tag == probeToken else { return }
+            checking = (sent: by, before: before.values)
+            let area = index
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.checkAim(area: area) }
+        } else if checking != nil, by.dx == 0 {
+            checking!.sent.dy += by.dy
+        }
     }
 
     private func checkAim(area: Int) {
@@ -595,6 +486,7 @@ final class ScrollMode: Mode {
                 Log.write("스크롤 지점: 어디서도 움직이지 않음 (끝일 수 있음) [\(aimKey)]")
                 aimIndex = 0
                 scrollPoint = points[0]
+                armAimCheck()
                 return
             }
             aimIndex += 1
@@ -616,7 +508,7 @@ final class ScrollMode: Mode {
                                         NSNumber(value: toTop ? 0.0 : 1.0)) == .success {
             return
         }
-        for _ in 0..<20 { send(CGVector(dx: 0, dy: toTop ? -5000 : 5000)) }
+        for _ in 0..<20 { driver.post(CGVector(dx: 0, dy: toTop ? -5000 : 5000)) }
     }
 }
 

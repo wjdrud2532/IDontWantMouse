@@ -310,7 +310,7 @@ final class TreeBuilder {
     /// 앞 앱의 모든 창과 그 안의 스크롤 영역.
     func scrollSnapshot() -> ScrollSnapshot {
         let wez = bundleID == WezTerm.bundleID ? WezTerm.Prefetch() : nil
-        AXEnabler.enable(app: app, pid: pid, bundleID: bundleID)
+        let justEnabled = AXEnabler.enable(app: app, pid: pid, bundleID: bundleID)
         var snap = ScrollSnapshot(pid: pid, bundleID: bundleID)
         let focused = focusedWindow()
         var refs = AX.elements(AX.copy(app, kAXWindowsAttribute))
@@ -331,6 +331,14 @@ final class TreeBuilder {
         for (i, w) in snap.windows.enumerated() {
             var areas = WezTerm.paneElements(for: w, tab: wezTabs[i])
             if areas.isEmpty { areas = scrollAreas(in: w.ref) }
+            // Electron 앱은 AX 를 처음 켠 직후엔 웹 내용 트리가 비어 있다 (Claude 앱을 띄우고 처음 열면 창 전체 하나만 잡혔다).
+            // 이 앱에서 처음 열 때만 잠깐씩 기다리며 다시 찾는다.
+            var waited = 0
+            while justEnabled, areas.isEmpty, waited < 5 {
+                usleep(100_000)
+                waited += 1
+                areas = scrollAreas(in: w.ref)
+            }
             // 스크롤 영역을 못 찾는 앱도 창 가운데에 휠 이벤트를 보내면 대개 스크롤된다
             if areas.isEmpty { areas = [w] }
             // 창 안의 영역 번호도 왼쪽→오른쪽, 위→아래
@@ -433,6 +441,25 @@ final class TreeBuilder {
         "com.operasoftware.Opera", "app.zen-browser.zen",
     ])
 
+    /// DOM 클래스·id 하나가 스크롤 상자를 가리키는지: 'scroll' 이 들었거나(c-scrollbar__hider, [scrollbar-gutter:stable] 등)
+    /// Tailwind 의 overflow-auto·overflow-y-auto 처럼 넘치면 스크롤하라는 클래스. 대괄호 밖에 ':' 가 있는 조건부 클래스
+    /// (`hover:…`, `…:has-[[data-…-scrolls-with-chat]]:relative`)는 이 요소가 스크롤 상자라는 뜻이 아니고(Claude 앱
+    /// 입력창이 이것 때문에 잡혔다), scroll-mt-4·scroll-pt-1 같은 scroll-margin·padding 은 스크롤될 대상에 붙으므로 치지 않는다.
+    static func marksScroller(_ name: String) -> Bool {
+        var depth = 0
+        for c in name {
+            switch c {
+            case "[": depth += 1
+            case "]": depth -= 1
+            case ":" where depth == 0: return false
+            default: break
+            }
+        }
+        if ["overflow-auto", "overflow-y-auto"].contains(name) { return true }
+        guard name.range(of: "scroll", options: .caseInsensitive) != nil else { return false }
+        return name.range(of: #"^-?scroll-[mp][trblxyse]?-"#, options: .regularExpression) == nil
+    }
+
     /// 안쪽 항목(표·트리는 줄)이 영역 밖(위·아래)까지 이어지는지: 그래야 스크롤되는 영역이다. 앞뒤 몇 개만 본다.
     private static func overflows(_ children: [AXUIElement], frame: CGRect) -> Bool {
         let sample = children.count <= 8 ? children : Array(children.prefix(4) + children.suffix(4))
@@ -461,7 +488,8 @@ final class TreeBuilder {
     }
 
     /// 웹 영역(Chromium·Electron·Safari) 안의 스크롤 영역. 웹은 AX 에 스크롤 여부를 알려주지 않아서 앱마다
-    /// 규칙을 두지 않고 공통 단서로 찾는다: 스크롤 막대가 있거나, 목록·표 역할이거나, DOM 클래스·id 에 'scroll' 이 든 것.
+    /// 규칙을 두지 않고 공통 단서로 찾는다: 스크롤 막대가 있거나, 목록·표 역할이거나, DOM 클래스·id 가 스크롤 상자를
+    /// 가리키는 것(marksScroller).
     /// 휠은 그 자리에서 가장 가까운 스크롤 가능한 조상으로 가므로 단서가 조금 빗나가도 알맞은 곳이 스크롤된다.
     private func webScrollers(in web: AXUIElement, clip: CGRect) -> [Element] {
         let listRoles: Set<String> = ["AXList", "AXOutline", "AXTable", "AXGrid"]
@@ -489,14 +517,18 @@ final class TreeBuilder {
             if depth == 0 { page = whole }
             if depth > 0 {
                 let names = ((v[3] as? [String]) ?? []) + [AX.string(v[4]) ?? ""]
-                let scrolly = names.contains { $0.range(of: "scroll", options: .caseInsensitive) != nil }
+                let scrolly = names.contains(where: Self.marksScroller)
                 // 이름도 스크롤 막대도 없는 목록·표는 내용이 실제로 넘칠 때만 (다 보이는 표는 스크롤되지 않는다):
                 // 줄이 목록 밖으로 나가거나(목록 자체가 스크롤) 목록이 조상 틀 밖으로 나갈 때(감싼 상자가 스크롤).
                 // 이름에 scroll 이 든 것은 그대로 둔다: 보이는 줄만 그리는 가상 목록(Slack)은 줄이 넘치지 않는다.
                 func overflowing() -> Bool {
                     if let bounds, whole.minY < bounds.minY - 8 || whole.maxY > bounds.maxY + 8 { return true }
                     let items = role == "AXList" ? AX.elements(v[6]) : AX.elements(AX.copy(ref, kAXRowsAttribute))
-                    return Self.overflows(items, frame: whole)
+                    // Chrome 은 화면(웹 영역) 끝에 걸린 표의 틀을 화면 끝에서 잘라 알려주면서 줄은 자르지 않는다.
+                    // 그쪽으로 넘친 줄은 페이지가 스크롤할 몫이라 치지 않는다 (GitHub 문서의 긴 표가 영역으로 잡혔다).
+                    let top = whole.minY <= page.minY + 2 ? -1e9 : whole.minY
+                    let bottom = whole.maxY >= page.maxY - 2 ? 1e9 : whole.maxY
+                    return Self.overflows(items, frame: CGRect(x: whole.minX, y: top, width: whole.width, height: bottom - top))
                 }
                 if scrolly || v[5] != nil || listRoles.contains(role) && overflowing(),
                    let e = Element.fetch(ref, clip: clip) {
@@ -580,14 +612,16 @@ enum AXEnabler {
         "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary", "com.vivaldi.Vivaldi",
     ]
 
-    /// TreeBuilder 의 직렬 큐에서만 부른다.
-    static func enable(app: AXUIElement, pid: pid_t, bundleID: String?) {
-        guard enabled.insert(pid).inserted else { return }
+    /// TreeBuilder 의 직렬 큐에서만 부른다. 이번에 처음 켰으면 true.
+    @discardableResult
+    static func enable(app: AXUIElement, pid: pid_t, bundleID: String?) -> Bool {
+        guard enabled.insert(pid).inserted else { return false }
         let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         // AXEnhancedUserInterface 는 창 관리자 애니메이션을 느리게 하므로 꼭 필요할 때만 켠다
         if manual != .success, let bundleID, chromiumBrowsers.contains(bundleID) {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }
+        return true
     }
 }
 

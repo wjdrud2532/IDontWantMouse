@@ -213,7 +213,7 @@ struct SettingsView: View {
                     Text(animationScale == 0 ? "끔" : "\(Int(animationScale * 100))%")
                         .monospacedDigit().frame(width: 40)
                 }
-                note("d/u 반 페이지 이동과 누르고 뗄 때의 가속·감속에 걸리는 시간입니다. 끄면 바로 이동합니다.")
+                note("d/u 반 페이지 이동과 누르고 뗄 때의 가속·감속에 걸리는 시간입니다. 끄면 바로 이동합니다. 반 페이지 이동은 몇 프레임 만에 건너뛰어 끊겨 보이지 않게 0.12초보다 짧아지지 않습니다.")
                 LabeledContent("터미널 휠 한 칸") {
                     HStack(spacing: 4) {
                         NumberField(value: $terminalNotchLines, range: 1...10).frame(width: 36)
