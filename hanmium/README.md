@@ -241,6 +241,7 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `TreeBuilder.swift` | AX 트리 훑기: 클릭 대상, 스크롤 영역(웹 공통 규칙), 포커스 영역, 상태 아이콘 캐시 |
 | `ClickMode.swift` | 라벨 클릭·검색 모드, 라벨 만들기 |
 | `ScrollMode.swift` | 스크롤 모드: 영역 고르기, 부드러운 스크롤, Enter 클릭, 시작 영역 기억 |
+| `ScrollDriver.swift` | 스크롤 움직임 계산과 휠 이벤트 보내기 (화면 새로 고침마다 전용 스레드에서) |
 | `Input.swift` | 단축키(Carbon), 키 코드 → 글자(한글 입력기에서도), 클릭·휠 이벤트 |
 | `AX.swift` | AX 호출 도우미, 화면 요소 |
 | `WezTerm.swift` | `wezterm cli` 로 분할 창 위치·활성 창, `~/.wezterm.lua` 읽기 |
@@ -253,6 +254,7 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `StatusItem.swift` | 메뉴 막대 아이콘과 메뉴 |
 | `Config.swift` | 설정 값, 설정 내보내기·가져오기 |
 | `Demos/` | 기능을 넣기 전에 비교해 본 예시 앱 (`Demos/build.sh DropletDemo`, `LinkLabelsDemo`) |
-| `Tools/` | 회귀 테스트, README 이미지 만들기(`make-doc-images.sh`) |
+| `Tools/` | 회귀 테스트, README 이미지 만들기(`make-doc-images.sh`), 앱 아이콘 만들기(`make-app-icon.sh`) |
+| `Resources/AppIcon.icns` | 앱 아이콘 (`build.sh` 가 앱에 넣는다) |
 
-README 의 이미지와 움직이는 그림(GIF)은 `Tools/make-doc-images.sh` 로 다시 만든다. 실제 화면을 찍지 않는다. Hanmium 의 그리기 코드로 지어낸 내용의 비슷한 화면(웹 페이지, VS Code, Slack, 터미널)과 설정 창을 화면 밖에서 그린다. Dock 그림만 실제 화면이다.
+README 의 이미지와 움직이는 그림(GIF)은 `Tools/make-doc-images.sh` 로 다시 만든다. 실제 화면을 찍지 않는다. Hanmium 의 그리기 코드로 지어낸 내용의 비슷한 화면(웹 페이지, VS Code, Slack, 터미널)과 설정 창을 화면 밖에서 그린다. Dock 그림만 실제 화면이다. 앱 아이콘도 `Tools/make-app-icon.sh` 가 코드로 그린다.
