@@ -187,7 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         replacing = false
     }
 
-    private func open(_ kind: ModeKind) {
+    /// timed: 단축키로 열 때 여기서 시간 재기를 시작한다. 다시 열 때는 다시 열기를 부른 때부터 잰다(reopenScroll).
+    private func open(_ kind: ModeKind, timed: Bool = true) {
         guard !building else { return }
         guard AXIsProcessTrusted() else {
             NSSound.beep()
@@ -195,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let front = NSWorkspace.shared.frontmostApplication else { return }
         if kind == .labels { Timing.begin("라벨 모드 [\(front.localizedName ?? "?")]") }
+        if kind == .scroll && timed { Timing.begin("스크롤 모드 [\(front.localizedName ?? "?")]") }
         // 라벨을 찾는 동안 유리 라벨이 굴절시킬 화면을 찍어둔다 (오버레이가 뜨기 전)
         if kind != .search { GlassSnapshots.retake() }
         building = true
@@ -238,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 흐름 중이면 옮겨 간 페이지를 아직 그리는 중일 수 있어서 조금 더 기다려 본다
             if scrollSession, emptyRetries < 3 {
                 emptyRetries += 1
-                reopenScroll(after: 0.3)
+                reopenScroll(after: 0.3, retry: true)
                 return
             }
             emptyRetries = 0
@@ -247,6 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         emptyRetries = 0
+        Timing.mark("영역 찾기 [\(snapshot.bundleID ?? "?")] (\(snapshot.areas.count)개)")
         let anchor = snapshot.windows.indices.contains(snapshot.focusedWindow)
             ? snapshot.windows[snapshot.focusedWindow].frame : nil
         let mode = ScrollMode(snapshot: snapshot, screen: Screens.screen(for: anchor))
@@ -256,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             open(.labels)
         }
         mode.onPassThrough = { [weak self] event in self?.passThrough(event) }
-        mode.onStale = { [weak self] in self?.reopenScroll(after: 0.2) }
+        mode.onStale = { [weak self] in self?.reopenScroll(after: 0.05) }
         scrollSession = true
         install(mode, .scroll)
     }
@@ -275,17 +278,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 e?.post(tap: .cghidEventTap)
             }
         }
-        reopenScroll(after: 0.4, unlessTyping: true)
+        // 키는 0.05초 뒤에 보낸다. 탭을 바꾸는 단축키(⌃Tab)는 화면이 바뀌는 데 시간이 조금 걸린다.
+        reopenScroll(after: 0.2, unlessTyping: true)
     }
 
     /// 흐름 중이면 delay 뒤 앞 앱에 스크롤 모드를 다시 연다. 여러 번 불리면 마지막 것만.
-    private func reopenScroll(after delay: Double, unlessTyping: Bool = false) {
+    /// retry: 안에서 다시 부른 것(찾는 중이라 미룸, 메뉴 기다림, 빈 결과)이라 시간 재기를 새로 시작하지 않는다.
+    private func reopenScroll(after delay: Double, unlessTyping: Bool = false, retry: Bool = false) {
         reopenWork?.cancel()
+        if !retry { Timing.begin("스크롤 모드 다시 열기") }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard scrollSession else { return endPopupWait() }
             if building {
-                reopenScroll(after: 0.1, unlessTyping: unlessTyping)
+                reopenScroll(after: 0.1, unlessTyping: unlessTyping, retry: true)
                 return
             }
             if Self.popupOpen() {
@@ -294,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // 고른 항목이 입력칸을 열었으면(새 파일 이름 등) 글을 쓰려는 것이라 끝낸다.
                 replace(current)
                 waitForPopup()
-                reopenScroll(after: 0.25, unlessTyping: true)
+                reopenScroll(after: 0.25, unlessTyping: true, retry: true)
                 return
             }
             endPopupWait()
@@ -304,7 +310,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             replace(current)
-            open(.scroll)
+            Timing.mark("기다림·확인")
+            open(.scroll, timed: false)
         }
         reopenWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -375,8 +382,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 // 누르기 직전(클릭은 이 뒤에 보낸다)
                 focusBefore = Self.focusedElement()
-                // 누른 뒤 페이지·창이 바뀔 시간을 두고 그 자리에 다시 연다
-                reopenScroll(after: 0.4)
+                // 클릭은 0.04초 뒤에 간다. 메뉴는 그사이 열리고, 늦게 바뀌는 페이지·늦게 뜨는 새 창은
+                // 다시 연 스크롤 모드가 알아차리고 새로 연다(ScrollMode.onStale).
+                reopenScroll(after: 0.15)
             }
         }
     }
@@ -414,7 +422,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let moved: (Notification) -> Void = { [weak self] _ in
             guard let self else { return }
-            if scrollSession { reopenScroll(after: 0.15) } else { current?.stop() }
+            // 앱이 바뀐 알림이 올 때는 창 순서·키 창이 이미 바뀌어 있다. 데스크톱을 옮기면 알림 두 개가 거의 같이 와서 하나로 모은다.
+            if scrollSession { reopenScroll(after: 0.03) } else { current?.stop() }
         }
         let center = NSWorkspace.shared.notificationCenter
         appWatcher = center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main,

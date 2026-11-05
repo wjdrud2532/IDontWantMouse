@@ -175,7 +175,7 @@ do {
         let color = Config.scrollBorderColor
         for (i, p) in panes.enumerated() where i != selected {
             Draw.glassArea(p, selected: panes[selected], color: color, fillOpacity: 0.12,
-                           edge: Draw.glassAreaEdge(p, color: color, fillOpacity: 0.12, bezel: Draw.slabBezel(3)))
+                           edge: Draw.glassAreaEdge(p, color: color, fillOpacity: 0.12))
         }
         Draw.glassRing(panes[selected], color: color, band: Draw.ringBand(3))
         for (i, p) in panes.enumerated() {
@@ -228,26 +228,57 @@ do {
     }
 }
 
-// MARK: 5. 설정 창 — 모든 항목이 보이게 높이를 늘려서
+// MARK: 5. 설정 창 — 탭(일반·라벨·스크롤)마다 모든 항목이 보이게 높이를 늘려 그린 뒤 나란히
 
 MainActor.assumeIsolated {
     _ = NSApplication.shared
-    SettingsView.height = 2350
-    let view = NSHostingView(rootView: SettingsView(onHotkeysChanged: {}, onRecording: { _ in }))
-    let size = CGSize(width: 460, height: SettingsView.height)
-    let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
-    window.appearance = NSAppearance(named: .aqua)
-    window.contentView = view
-    view.frame = CGRect(origin: .zero, size: size)
-    view.layoutSubtreeIfNeeded()
-    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
-                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-    rep.size = size
-    view.cacheDisplay(in: view.bounds, to: rep)
-    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(outDir)/settings.png"))
-    print("만듦: \(outDir)/settings.png")
+    SettingsView.height = 1700
+    var shots: [(rep: NSBitmapImageRep, height: CGFloat)] = []
+    for tab in SettingsView.Tab.allCases {
+        SettingsView.forcedTab = tab
+        let view = NSHostingView(rootView: SettingsView(onHotkeysChanged: {}, onRecording: { _ in }))
+        let size = CGSize(width: 460, height: SettingsView.height)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered,
+                              defer: false)
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = view
+        view.frame = CGRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale),
+                                   pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+                                   bitsPerPixel: 0)!
+        rep.size = size
+        view.cacheDisplay(in: view.bounds, to: rep)
+        // 아래쪽 빈 바탕은 잘라 낸다: 바탕색과 다른 픽셀이 있는 마지막 줄 + 여백
+        let background = rep.colorAt(x: 2, y: rep.pixelsHigh - 2)
+        var last = rep.pixelsHigh - 1
+        search: while last > 0 {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 4) where rep.colorAt(x: x, y: last) != background {
+                break search
+            }
+            last -= 1
+        }
+        shots.append((rep, min(size.height, CGFloat(last) / scale + 16)))
+    }
+    SettingsView.forcedTab = nil
+    let gap: CGFloat = 16
+    let size = CGSize(width: CGFloat(shots.count) * 460 + CGFloat(shots.count - 1) * gap,
+                      height: shots.map(\.height).max() ?? 0)
+    savePNG("settings", size: size) {
+        NSColor.clear.setFill()
+        CGRect(origin: .zero, size: size).fill()
+        for (i, shot) in shots.enumerated() {
+            let x = CGFloat(i) * (460 + gap)
+            let crop = CGRect(x: 0, y: 0, width: 460 * scale, height: shot.height * scale)
+            if let cg = shot.rep.cgImage?.cropping(to: crop) {
+                NSImage(cgImage: cg, size: CGSize(width: 460, height: shot.height))
+                    .draw(in: CGRect(x: x, y: 0, width: 460, height: shot.height), from: .zero, operation: .copy,
+                          fraction: 1, respectFlipped: true, hints: nil)
+            }
+        }
+    }
 }
 
 // MARK: 6~8. VS Code·Slack 라벨, Slack 다중 스크롤 움직이는 그림 (지어낸 내용의 비슷한 화면)
@@ -398,7 +429,7 @@ final class SlackClip {
                 let color = Config.scrollBorderColor
                 for (i, a) in screen.areas.enumerated() where i != selected {
                     Draw.glassArea(a, selected: screen.areas[selected], color: color, fillOpacity: 0.12,
-                                   edge: Draw.glassAreaEdge(a, color: color, fillOpacity: 0.12, bezel: Draw.slabBezel(3)))
+                                   edge: Draw.glassAreaEdge(a, color: color, fillOpacity: 0.12))
                 }
                 Draw.glassRing(screen.areas[selected], color: color, band: Draw.ringBand(3))
                 for (i, a) in screen.areas.enumerated() {

@@ -21,19 +21,23 @@ enum LiquidGlass {
     static let saturation: CGFloat = 1.4
     /// 라벨 유리 두께(반지름 배수, 굴절 강도 100% 기준)와 굽은 가장자리 폭.
     /// 두꺼울수록 가장자리가 안쪽 화면을 더 끌어와 경계가 또렷하다.
-    static let labelThickness: CGFloat = 1.6
-    static let labelBezel: CGFloat = 0.95
+    static let labelThickness: CGFloat = 2.0
+    static let labelBezel: CGFloat = 1.0
+    /// 라벨 가장자리 단면의 지수. 4(스퀘어클, 스크롤 테두리)는 가장자리 가까이에서만 휘고 작을수록 안쪽까지 휜다.
+    /// 3 이면 반지름 가운데쯤에서 휘는 정도가 4 일 때의 3배쯤이다.
+    static let labelPower: CGFloat = 3
 
     /// 가장자리에서 t(0~1) 만큼 들어온 자리의 굴절 이동 거리. 픽셀마다 삼각함수를 풀지 않게 미리 계산해 둔다.
     struct Profile {
         private let table: [CGFloat]
 
-        init(bezel: CGFloat, thickness: CGFloat, samples: Int = 128) {
+        init(bezel: CGFloat, thickness: CGFloat, power p: CGFloat = 4, samples: Int = 128) {
             table = (0..<samples).map { i in
+                // 단면 u^p + (h/thickness)^p = 1 의 높이와 기울기 (p = 4 면 스퀘어클)
                 let u = 1 - CGFloat(i) / CGFloat(samples - 1)
-                let base = max(1 - u * u * u * u, 1e-6)
-                let height = thickness * pow(base, 0.25)
-                let slope = thickness / max(bezel, 1e-3) * u * u * u * pow(base, -0.75)
+                let base = max(1 - pow(u, p), 1e-6)
+                let height = thickness * pow(base, 1 / p)
+                let slope = thickness / max(bezel, 1e-3) * pow(u, p - 1) * pow(base, 1 / p - 1)
                 let incident = atan(slope)
                 return height * tan(incident - asin(sin(incident) / refractiveIndex))
             }
@@ -62,7 +66,7 @@ enum LiquidGlass {
         let radius = CGFloat(h) / 2
         let bezel = radius * labelBezel
         let refraction = Config.glassRefraction
-        let profile = Profile(bezel: bezel, thickness: radius * labelThickness * refraction)
+        let profile = Profile(bezel: bezel, thickness: radius * labelThickness * refraction, power: labelPower)
         let blur = Int((radius * 0.3 * Config.glassBlur).rounded())
         let tintAmount = Config.glassTint
         let specular = Config.glassSpecular
@@ -160,7 +164,7 @@ enum LiquidGlass {
     ///   스크롤하는 내용이 막대에 비치지 않는다.
     static func renderEdge(_ rect: CGRect, ring: Bool, width: CGFloat, cornerRadius: CGFloat, tint: NSColor,
                            tintAlpha: CGFloat, saturation: CGFloat = saturation, specular: CGFloat? = nil,
-                           fill: CGFloat = 0, thickness: CGFloat? = nil,
+                           fill: CGFloat = 0, thickness: CGFloat? = nil, power: CGFloat = 4, rim: CGFloat? = nil,
                            from snap: ScreenSnapshot) -> (image: CGImage, frame: CGRect)? {
         let s = snap.scale
         let frame = ring ? rect.insetBy(dx: -width, dy: -width) : rect
@@ -173,7 +177,8 @@ enum LiquidGlass {
         let radius = cornerRadius * s
         let hx = CGFloat(w) / 2 - inset - radius, hy = CGFloat(h) / 2 - inset - radius
         let bezel = ring ? width * s / 2 : width * s
-        let profile = Profile(bezel: bezel, thickness: thickness.map { $0 * s } ?? bezel)
+        let profile = Profile(bezel: bezel, thickness: thickness.map { $0 * s } ?? bezel, power: power)
+        let rimWidth = rim.map { $0 * s } ?? bezel
         // 사진에서 frame 왼쪽 위 픽셀
         let gx = (frame.minX - snap.axFrame.minX) * s, gy = (frame.minY - snap.axFrame.minY) * s
         // 가장자리 띠 바깥은 계산하지 않는다
@@ -215,7 +220,8 @@ enum LiquidGlass {
                 let u = 1 - t
                 let shift = profile.shift(t)
                 let facing = -(ix * toLight.dx + iy * toLight.dy)
-                let light = u * u * u * (facing > 0 ? facing * facing : 0.4 * facing * facing)
+                let ur = 1 - min(max(edge, 0) / rimWidth, 1)
+                let light = ur * ur * ur * (facing > 0 ? facing * facing : 0.4 * facing * facing)
 
                 var (r, g, b) = snap.sample(src, gx + px + ix * shift, gy + py + iy * shift)
                 let l = 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -622,31 +628,57 @@ final class GlassSource {
     }
 
     /// saturation: 굴절된 뒤 화면의 채도 배율. 1 이면 뒤 색 그대로(고르지 않은 영역 — 색이 바뀌어 보이지 않게).
+    /// power: 가장자리 단면의 지수(LiquidGlass.Profile). 4 는 가장자리 가까이만, 작을수록 안쪽까지 휜다.
+    /// rim: 가장자리 빛이 맺히는 폭(pt). nil 이면 굴절 폭과 같다.
     func edge(_ rect: CGRect, ring: Bool, width: CGFloat, cornerRadius: CGFloat, tint: NSColor,
               tintAlpha: CGFloat, saturation: CGFloat = LiquidGlass.saturation, specular: CGFloat? = nil,
-              fill: CGFloat = 0, thickness: CGFloat? = nil,
-              cached: Bool = true) -> (image: CGImage, frame: CGRect)? {
+              fill: CGFloat = 0, thickness: CGFloat? = nil, power: CGFloat = 4, rim: CGFloat? = nil,
+              dome: Bool = false, cached: Bool = true) -> (image: CGImage, frame: CGRect)? {
         let spec = specular ?? (ring ? 0.9 : 0.75)
         let make = {
             self.gpuEdge(rect, ring: ring, width: width, cornerRadius: cornerRadius, tint: tint, tintAlpha: tintAlpha,
-                         saturation: saturation, specular: spec, fill: fill, thickness: thickness)
+                         saturation: saturation, specular: spec, fill: fill, thickness: thickness, power: power, rim: rim,
+                         dome: dome)
                 ?? LiquidGlass.renderEdge(rect, ring: ring, width: width, cornerRadius: cornerRadius, tint: tint,
                                           tintAlpha: tintAlpha, saturation: saturation, specular: spec, fill: fill,
-                                          thickness: thickness, from: self.snapshot)
+                                          thickness: thickness, power: power, rim: rim, from: self.snapshot)
         }
         guard cached else { return make() }
         let key = "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height),\(ring),\(width),\(cornerRadius),"
-            + "\(tint.hexString ?? ""),\(tintAlpha),\(saturation),\(spec),\(fill),\(thickness ?? -1)"
+            + "\(tint.hexString ?? ""),\(tintAlpha),\(saturation),\(spec),\(fill),\(thickness ?? -1),\(power),\(rim ?? -1),\(dome)"
         if let hit = edgeCache[key] { return hit }
         let made = make()
         edgeCache[key] = made
         return made
     }
 
+    /// 영역 rect 에서 hole(둥근 사각형, 움직이는 테두리 바깥)을 뺀 유리판(GPU). 테두리가 움직이는 동안 매 장면
+    /// 새로 그리므로 캐시하지 않는다. 띠 안쪽의 옅은 칠까지 담겨 있다. GPU 를 못 쓰면 nil.
+    func carvedSlab(_ rect: CGRect, cornerRadius: CGFloat, hole: CGRect, holeRadius: CGFloat, bezel: CGFloat,
+                    thickness: CGFloat, power: CGFloat, rim: CGFloat, dome: Bool = false, holeBezel: CGFloat = 0,
+                    holeThickness: CGFloat = 0, tint: NSColor, tintAlpha: CGFloat,
+                    saturation: CGFloat = LiquidGlass.saturation, specular: CGFloat) -> CGImage? {
+        guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(.sRGB)
+        else { return nil }
+        let s = snapshot.scale
+        let hr = min(holeRadius, hole.width / 2, hole.height / 2) * s
+        let job = GlassGPU.HoleJob(
+            paneX: Float((rect.minX - snapshot.axFrame.minX) * s), paneY: Float((rect.minY - snapshot.axFrame.minY) * s),
+            paneW: Float((rect.width * s).rounded()), paneH: Float((rect.height * s).rounded()),
+            paneRadius: Float(cornerRadius * s), holeCX: Float((hole.midX - rect.minX) * s),
+            holeCY: Float((hole.midY - rect.minY) * s), holeHX: Float(hole.width * s / 2 - hr),
+            holeHY: Float(hole.height * s / 2 - hr), holeRadius: Float(hr), bezel: Float(bezel * s),
+            thickness: Float(thickness * s), power: Float(power), smooth: Float(10 * s), tintAlpha: Float(tintAlpha),
+            saturation: Float(saturation), tintR: Float(tc.redComponent), tintG: Float(tc.greenComponent),
+            tintB: Float(tc.blueComponent), specular: Float(specular), rim: Float(rim * s), dome: dome ? 1 : 0,
+            holeBezel: Float(holeBezel * s), holeThickness: Float(holeThickness * s))
+        return gpu.renderHole(job, from: texture)
+    }
+
     /// LiquidGlass.renderEdge 와 같은 값을 사진 픽셀 기준으로 계산해 GPU 로 그린다
     private func gpuEdge(_ rect: CGRect, ring: Bool, width: CGFloat, cornerRadius: CGFloat, tint: NSColor,
                          tintAlpha: CGFloat, saturation: CGFloat, specular: CGFloat, fill: CGFloat,
-                         thickness: CGFloat?) -> (image: CGImage, frame: CGRect)? {
+                         thickness: CGFloat?, power: CGFloat, rim: CGFloat?, dome: Bool) -> (image: CGImage, frame: CGRect)? {
         guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(.sRGB)
         else { return nil }
         let s = snapshot.scale
@@ -661,7 +693,8 @@ final class GlassSource {
                               bezel: ring ? width * s / 2 : width * s, ring: ring,
                               tint: (tc.redComponent, tc.greenComponent, tc.blueComponent), tintAlpha: tintAlpha,
                               saturation: saturation, specular: specular, fill: fill,
-                              thickness: (thickness ?? (ring ? width / 2 : width)) * s, from: texture).map { ($0, frame) }
+                              thickness: (thickness ?? (ring ? width / 2 : width)) * s, power: power,
+                              rim: (rim ?? 0) * s, dome: dome, from: texture).map { ($0, frame) }
     }
 }
 

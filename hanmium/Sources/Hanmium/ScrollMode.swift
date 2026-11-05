@@ -10,16 +10,21 @@ import QuartzCore
 /// Tab·Shift-Tab, Ctrl-N/P: 다음/이전 스크롤 영역(창을 넘나든다). Enter: 그 영역을 눌러 포커스를 옮기고 끝내기.
 /// f: 라벨 띄우기(onLabels). 그 밖의 ⌘·⌃ 단축키(탭 바꾸기 등)는 앱으로 넘긴다(onPassThrough). Esc: 끝내기.
 /// 휠 이벤트는 커서를 옮기지 않고 그 창에 직접 보낸다. 그럴 수 없는 곳에서만 커서를 영역으로 옮긴다.
-/// 페이지를 옮겨 가서 고른 영역의 AX 요소가 사라지면 onStale 로 알린다(그 자리에 새로 열어야 한다).
+/// 페이지를 옮겨 가서 고른 영역의 AX 요소가 사라지거나 앱의 키 창이 바뀌면 onStale 로 알린다(그 자리에 새로 열어야 한다).
 final class ScrollMode: Mode {
     var onExit: (() -> Void)?
     /// f 를 눌렀을 때 (라벨 모드로 넘어가기)
     var onLabels: (() -> Void)?
     /// 스크롤 모드가 쓰지 않는 ⌘·⌃ 단축키를 눌렀을 때 (앱으로 넘겨야 한다)
     var onPassThrough: ((NSEvent) -> Void)?
-    /// 고른 영역이 사라졌을 때. 웹 페이지는 문서가 바뀌면(같은 사이트 안에서 옮겨 가도) 스크롤 영역 요소를 새로 만든다.
+    /// 고른 영역이 사라졌거나 키 창이 바뀌었을 때. 웹 페이지는 문서가 바뀌면(같은 사이트 안에서 옮겨 가도)
+    /// 스크롤 영역 요소를 새로 만든다. 누른 것이 새 창을 열면 키 창이 바뀐다.
     var onStale: (() -> Void)?
     private var staleTimer: Timer?
+    /// 앱의 키 창. 열 때 값에서 바뀌면 새로 연다.
+    private var keyWindow: AXUIElement?
+    /// 이때까지는 키 창이 바뀌어도 새로 열지 않고 그 창을 기준으로 삼는다 (가려진 창을 스스로 앞으로 올렸을 때)
+    private var adoptKeyWindowUntil: CFTimeInterval = 0
     private let pid: pid_t
     private let bundleID: String?
     private let windows: [Element]
@@ -46,6 +51,11 @@ final class ScrollMode: Mode {
     private var motion: DropletMotion?
     /// 고르지 않은 영역마다 그려 둔 유리판 굴절 가장자리. 그 영역을 다시 고르면 지운다.
     private var slabEdges: [Int: (image: CGImage, frame: CGRect)] = [:]
+    /// 유리판 가장자리 띠는 사진으로 그려 두어서, 띠 밑 내용(다른 분할 창의 출력)이 바뀌면 띠만 멈춰 보인다.
+    /// 1초마다 새 화면을 한 장 받아 다시 그린다(화면이 그대로면 새 장이 오지 않는다).
+    private var slabRefreshTimer: Timer?
+    private var slabObserver: NSObjectProtocol?
+    private var slabsDrawnAt: CFTimeInterval = 0
     private var motionTimer: Timer?
     /// 휠을 보낼 지점 후보 중 지금 쓰는 것(aimPoints). 보낸 뒤 내용이 움직였는지 확인될 때까지 aimConfirmed 는 false.
     private var aimIndex = 0
@@ -67,9 +77,11 @@ final class ScrollMode: Mode {
         // 테두리는 스크롤하는 앱의 창 바로 위에만 그려서 다른 앱 창이 덮으면 같이 가려지게 한다
         let focusedWindow = snapshot.windows.indices.contains(snapshot.focusedWindow)
             ? AX.windowID(snapshot.windows[snapshot.focusedWindow].ref) : nil
-        overlay = Overlay(keyScreen: screen, stackedAbove: focusedWindow)
+        // 닫힐 때 서서히 사라지는 효과(설정, 기본 꺼짐). 켜면 앱을 바꿀 때 지난 테두리가 0.2초쯤 남는다.
+        overlay = Overlay(keyScreen: screen, stackedAbove: focusedWindow, fades: Config.scrollAnimation)
         glassLabels = GlassSnapshots.wanted
         focusAtStart = snapshot.focus
+        keyWindow = snapshot.keyWindow
         windowID = focusedWindow
         // 포커스가 그대로면 마지막으로 쓰던 영역, 바뀌었으면 포커스가 있는 영역, 둘 다 없으면 가장 큰 영역에서 시작
         let remembered = focusedWindow.flatMap { ScrollMemory.entries[$0] }.flatMap { entry -> Int? in
@@ -96,23 +108,45 @@ final class ScrollMode: Mode {
         if glassLabels { GlassSnapshots.startStream(excluding: overlay.windowIDs) }
         focus(index)
         watchStale()
+        if glassLabels, Config.inactiveAreaShown, Config.inactiveAreaStyle == .glass, areas.count > 1 {
+            slabObserver = NotificationCenter.default.addObserver(forName: GlassSnapshots.didChange, object: nil,
+                                                                  queue: .main) { [weak self] _ in
+                // 스크롤하는 동안에는 화면이 초당 수십 장 와서 1초에 한 번만
+                guard let self, !stopped, CACurrentMediaTime() - slabsDrawnAt >= 0.9 else { return }
+                slabsDrawnAt = CACurrentMediaTime()
+                slabEdges.removeAll()
+                overlay.redraw()
+            }
+            slabRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                _ = GlassSnapshots.wantLive(for: 0.05)
+            }
+        }
     }
 
-    /// 고른 영역 요소가 아직 있는지 0.5초마다 본다. 사라진 요소로는 표지를 읽지 못해서, 휠이 안 먹은 줄 알고
-    /// 다른 지점에 같은 양을 다시 보내 크게 튄다(checkAim). 앱이 느려도 키 입력이 막히지 않게 AX 는 뒤에서 묻는다.
+    /// 고른 영역 요소가 아직 있는지, 앱의 키 창이 그대로인지 0.25초마다 본다. 사라진 요소로는 표지를 읽지 못해서,
+    /// 휠이 안 먹은 줄 알고 다른 지점에 같은 양을 다시 보내 크게 튄다(checkAim). 라벨을 누른 뒤 바로 다시 열어서
+    /// 페이지가 늦게 바뀌거나 새 창이 늦게 뜨는 것도 여기서 잡는다. 앱이 느려도 키 입력이 막히지 않게 AX 는 뒤에서 묻는다.
     private func watchStale() {
-        staleTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        let app = AXUIElementCreateApplication(pid)
+        staleTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self, !stopped else { return }
             let ref = current.ref
             DispatchQueue.global(qos: .utility).async {
                 var value: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(ref, kAXRoleAttribute as CFString, &value) == .invalidUIElement
-                else { return }
+                let gone = AXUIElementCopyAttributeValue(ref, kAXRoleAttribute as CFString, &value) == .invalidUIElement
+                let key = AX.element(AX.copy(app, kAXFocusedWindowAttribute))
                 DispatchQueue.main.async { [weak self] in
                     guard let self, !stopped, CFEqual(current.ref, ref), staleTimer != nil else { return }
+                    var reason: String?
+                    if gone {
+                        reason = "스크롤 영역이 사라짐(페이지 바뀜)"
+                    } else if let key, !(keyWindow.map { CFEqual($0, key) } ?? false) {
+                        if CACurrentMediaTime() < adoptKeyWindowUntil { keyWindow = key } else { reason = "키 창이 바뀜" }
+                    }
+                    guard let reason else { return }
                     staleTimer?.invalidate()
                     staleTimer = nil
-                    Log.write("스크롤 영역이 사라짐(페이지 바뀜) → 새로 열기 [\(bundleID ?? "?")]")
+                    Log.write("\(reason) → 새로 열기 [\(bundleID ?? "?")]")
                     onStale?()
                 }
             }
@@ -128,6 +162,8 @@ final class ScrollMode: Mode {
         }
         driver.stop()
         staleTimer?.invalidate()
+        slabRefreshTimer?.invalidate()
+        if let slabObserver { NotificationCenter.default.removeObserver(slabObserver) }
         motionTimer?.invalidate()
         glassRefresh?.cancel()
         GlassSnapshots.stopStream()
@@ -151,14 +187,29 @@ final class ScrollMode: Mode {
         let blob = motion?.rect ?? current.visibleFrame
         if Config.inactiveAreaShown, Config.inactiveAreaStyle == .glass {
             let color = Config.inactiveAreaColor, fill = Config.inactiveFillOpacity
-            for (i, a) in areas.enumerated() where i != index && a.window == currentWindow
+            // 테두리가 움직이는 동안은 유리판 = 영역 − 움직이는 테두리(유리 막대 바깥까지). 갈 영역에도 유리판이 남아 있다가
+            // 테두리 모양대로 파이고, 떠난 영역은 테두리가 빠져나가는 모양대로 차오른다.
+            let hole: (rect: CGRect, radius: CGFloat)? = !moving ? nil
+                : Config.scrollBorderShown && Config.scrollBorderStyle == .glass
+                ? Draw.ringOuter(blob, band: Draw.ringBand(width), stretch: motion?.stretch ?? 0, lens: motion?.lens ?? 0)
+                : (blob, Draw.blobRadius(blob, stretch: motion?.stretch ?? 0, lens: motion?.lens ?? 0))
+            for (i, a) in areas.enumerated() where (i != index || hole != nil) && a.window == currentWindow
                 && rect.intersects(a.area.visibleFrame) {
-                // 굴절 가장자리는 고르지 않은 영역이 된 때의 화면으로 한 번만 그려 두고 그대로 쓴다
                 let slab = a.area.visibleFrame
-                if slabEdges[i] == nil {
-                    slabEdges[i] = Draw.glassAreaEdge(slab, color: color, fillOpacity: fill, bezel: Draw.slabBezel(width))
+                // 테두리가 닿는(굴절 띠 안에 들어오는) 영역만 매 장면 새로 그린다
+                if let hole, hole.rect.insetBy(dx: -Draw.slabBezel(for: slab), dy: -Draw.slabBezel(for: slab)).intersects(slab) {
+                    if hole.rect.contains(slab)
+                        || Draw.carvedGlassArea(slab, hole: hole.rect, holeRadius: hole.radius, color: color, fillOpacity: fill) {
+                        continue
+                    }
+                    if i == index { continue }  // GPU 를 못 쓰면 예전처럼 고른 영역은 비운다
                 }
-                Draw.glassArea(slab, selected: current.visibleFrame, color: color, fillOpacity: fill, edge: slabEdges[i])
+                // 굴절 가장자리는 한 번 그려 두고 그대로 쓴다(1초마다 새 화면으로 다시 그림)
+                if slabEdges[i] == nil {
+                    slabEdges[i] = Draw.glassAreaEdge(slab, color: color, fillOpacity: fill)
+                }
+                Draw.glassArea(slab, selected: hole == nil ? current.visibleFrame : .zero, color: color, fillOpacity: fill,
+                               edge: slabEdges[i])
             }
         } else if Config.inactiveAreaShown {
             // 같은 창의 다른 스크롤 영역(숫자·Tab 으로 옮겨갈 곳)은 점선 + 옅은 칠. 다른 창 영역은 그리지 않는다:
@@ -243,6 +294,7 @@ final class ScrollMode: Mode {
         let visible = visiblePoint()
         if visible == nil {
             // 다른 창에 완전히 가려져 있으면 보이도록 앞으로 올린다. 그 앱이 키 포커스를 가져가므로 되찾는다.
+            adoptKeyWindowUntil = CACurrentMediaTime() + 0.5
             AXUIElementPerformAction(window.ref, kAXRaiseAction as CFString)
             let chosen = index
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in

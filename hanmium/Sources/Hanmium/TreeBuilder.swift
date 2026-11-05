@@ -18,6 +18,8 @@ struct ScrollSnapshot {
     var focus: CGRect?
     /// 포커스가 있는 영역(areas 인덱스). 모드를 열 때 여기서 시작한다.
     var focusedArea: Int?
+    /// 앱이 알려준 키 창 그대로 (없으면 nil). 스크롤 모드가 키 창이 바뀌었는지 볼 때 기준으로 쓴다.
+    var keyWindow: AXUIElement?
 }
 
 /// 앞 앱의 AX 트리를 훑어 클릭 대상이나 스크롤 영역을 모은다. AX 호출이 느릴 수 있어 백그라운드에서 돈다.
@@ -325,10 +327,14 @@ final class TreeBuilder {
 
     /// 앞 앱의 모든 창과 그 안의 스크롤 영역.
     func scrollSnapshot() -> ScrollSnapshot {
+        let profile = Profile()
+        defer { profile.report("스크롤 영역") }
         let wez = bundleID == WezTerm.bundleID ? WezTerm.Prefetch() : nil
         let justEnabled = AXEnabler.enable(app: app, pid: pid, bundleID: bundleID)
+        profile.mark("AX 켜기")
         var snap = ScrollSnapshot(pid: pid, bundleID: bundleID)
-        let focused = focusedWindow()
+        snap.keyWindow = AX.element(AX.copy(app, kAXFocusedWindowAttribute))
+        let focused = snap.keyWindow ?? focusedWindow()
         var refs = AX.elements(AX.copy(app, kAXWindowsAttribute))
         if refs.isEmpty, let focused { refs = [focused] }
 
@@ -340,8 +346,10 @@ final class TreeBuilder {
         }
         // 화면에서 왼쪽→오른쪽, 위→아래 순서로 번호를 붙인다
         snap.windows.sort { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
+        profile.mark("창 \(snap.windows.count)개")
 
         let cli = wez?.wait() ?? (panes: [], focused: nil)
+        if wez != nil { profile.mark("WezTerm 패널") }
         let wezPanes = cli.panes
         let wezTabs = WezTerm.visibleTabs(for: snap.windows, in: wezPanes, focused: .some(cli.focused))
         for (i, w) in snap.windows.enumerated() {
@@ -360,11 +368,13 @@ final class TreeBuilder {
             // 창 안의 영역 번호도 왼쪽→오른쪽, 위→아래
             areas.sort { ($0.visibleFrame.minX, $0.visibleFrame.minY) < ($1.visibleFrame.minX, $1.visibleFrame.minY) }
             snap.areas += areas.map { (area: $0, window: i) }
+            profile.mark("창\(i + 1) 영역 \(areas.count)개")
         }
         if let focused, let i = snap.windows.firstIndex(where: { CFEqual($0.ref, focused) }) {
             snap.focusedWindow = i
         }
         findFocus(in: &snap, wezPanes: wezPanes)
+        profile.mark("포커스")
         return snap
     }
 
@@ -405,21 +415,33 @@ final class TreeBuilder {
         func visit(_ ref: AXUIElement, clip: CGRect, depth: Int) {
             guard depth < 40, visited < maxVisited else { return }
             visited += 1
-            guard let e = Element.fetch(ref, clip: clip) else { return }
-            let hasFrame = e.frame.width > 0 && e.frame.height > 0
-            if hasFrame && !e.frame.intersects(clip) { return }
-            if Self.leafRoles.contains(e.role) { return }
-            if e.role == "AXScrollArea", e.visibleFrame.width >= 40, e.visibleFrame.height >= 40 {
+            // 훑는 동안은 역할·위치·크기만 묻고, 영역으로 쓸 것만 나머지 속성까지 받는다. Mail 처럼 제목·설명을
+            // 만드는 데 시간이 드는 앱은 노드마다 속성 10개를 다 물으면 노드 56개에 70ms 가 걸렸다.
+            let v = AX.multi(ref, [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute])
+            guard let role = AX.string(v[0]) else { return }
+            var frame = CGRect.zero
+            if let origin = AX.point(v[1]), let size = AX.size(v[2]) { frame = CGRect(origin: origin, size: size) }
+            let visible = frame.intersection(clip)
+            let hasFrame = frame.width > 0 && frame.height > 0
+            if hasFrame && !frame.intersects(clip) { return }
+            if Self.leafRoles.contains(role) { return }
+            if role == "AXScrollArea", visible.width >= 40, visible.height >= 40, let e = Element.fetch(ref, clip: clip) {
                 areas.append(e)
             }
-            if e.role == "AXWebArea" {
-                webFrames.append(e.visibleFrame)
-                areas += splitPanes(in: ref, clip: clip) + webScrollers(in: ref, clip: clip)
+            if role == "AXWebArea" {
+                webFrames.append(visible)
+                // 두 훑기는 서로 상관없어서 동시에 묻는다. 차례로 하면 두 시간이 더해졌다(Slack 35 + 27ms).
+                var panes: [Element] = []
+                let group = DispatchGroup()
+                DispatchQueue.global(qos: .userInteractive).async(group: group) { panes = self.splitPanes(in: ref, clip: clip) }
+                let scrollers = webScrollers(in: ref, clip: clip)
+                group.wait()
+                areas += panes + scrollers
                 return
             }
-            if stopRoles.contains(e.role) { return }
-            let childClip = hasFrame && Self.clippingRoles.contains(e.role) ? clip.intersection(e.frame) : clip
-            for child in children(ref, role: e.role) { visit(child, clip: childClip, depth: depth + 1) }
+            if stopRoles.contains(role) { return }
+            let childClip = hasFrame && Self.clippingRoles.contains(role) ? clip.intersection(frame) : clip
+            for child in children(ref, role: role) { visit(child, clip: childClip, depth: depth + 1) }
         }
         visit(window, clip: screenBounds, depth: 0)
 
@@ -477,6 +499,16 @@ final class TreeBuilder {
     }
 
     /// 안쪽 항목(표·트리는 줄)이 영역 밖(위·아래)까지 이어지는지: 그래야 스크롤되는 영역이다. 앞뒤 몇 개만 본다.
+    /// 코드 블록이면 코드 줄들: 자신이나 바로 아래 자식이 코드(<code>, AXCodeStyleGroup)일 때 그 자식들
+    private static func codeLines(_ ref: AXUIElement, children: [AXUIElement]) -> [AXUIElement]? {
+        if AX.string(AX.copy(ref, kAXSubroleAttribute)) == "AXCodeStyleGroup" { return children }
+        guard children.count <= 3 else { return nil }
+        for child in children where AX.string(AX.copy(child, kAXSubroleAttribute)) == "AXCodeStyleGroup" {
+            return AX.elements(AX.copy(child, kAXChildrenAttribute))
+        }
+        return nil
+    }
+
     private static func overflows(_ children: [AXUIElement], frame: CGRect) -> Bool {
         let sample = children.count <= 8 ? children : Array(children.prefix(4) + children.suffix(4))
         for child in sample {
@@ -533,7 +565,7 @@ final class TreeBuilder {
             if depth == 0 { page = whole }
             if depth > 0 {
                 let names = ((v[3] as? [String]) ?? []) + [AX.string(v[4]) ?? ""]
-                let scrolly = names.contains(where: Self.marksScroller)
+                var scrolly = names.contains(where: Self.marksScroller)
                 // 이름도 스크롤 막대도 없는 목록·표는 내용이 실제로 넘칠 때만 (다 보이는 표는 스크롤되지 않는다):
                 // 줄이 목록 밖으로 나가거나(목록 자체가 스크롤) 목록이 조상 틀 밖으로 나갈 때(감싼 상자가 스크롤).
                 // 이름에 scroll 이 든 것은 그대로 둔다: 보이는 줄만 그리는 가상 목록(Slack)은 줄이 넘치지 않는다.
@@ -545,6 +577,13 @@ final class TreeBuilder {
                     let top = whole.minY <= page.minY + 2 ? -1e9 : whole.minY
                     let bottom = whole.maxY >= page.maxY - 2 ? 1e9 : whole.maxY
                     return Self.overflows(items, frame: CGRect(x: whole.minX, y: top, width: whole.width, height: bottom - top))
+                }
+                // 코드 블록(<pre><code>)은 긴 줄이 가로로 넘쳐서 thin-scrollbar 같은 이름을 달지만 세로로는 스크롤되지 않는다.
+                // 줄이 블록 밖으로 세로로 넘칠 때만 영역으로 친다(max.modular.com 문서의 코드 블록이 영역으로 잡혀 유리판이 덮였다).
+                if scrolly, v[5] == nil, let lines = Self.codeLines(ref, children: AX.elements(v[6])) {
+                    let top = whole.minY <= page.minY + 2 ? -1e9 : whole.minY
+                    let bottom = whole.maxY >= page.maxY - 2 ? 1e9 : whole.maxY
+                    scrolly = Self.overflows(lines, frame: CGRect(x: whole.minX, y: top, width: whole.width, height: bottom - top))
                 }
                 if scrolly || v[5] != nil || listRoles.contains(role) && overflowing(),
                    let e = Element.fetch(ref, clip: clip) {

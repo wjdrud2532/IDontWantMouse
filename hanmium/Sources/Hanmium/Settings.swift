@@ -80,6 +80,7 @@ struct SettingsView: View {
     @AppStorage(ModeKind.scroll.hotkeyKey, store: Config.defaults) private var scrollKey = ModeKind.scroll.defaultHotkey
     @AppStorage("labelCharacters", store: Config.defaults) private var labelCharacters = Config.defaultLabelCharacters
     @AppStorage("labelAnimation", store: Config.defaults) private var labelAnimation = false
+    @AppStorage("scrollAnimation", store: Config.defaults) private var scrollAnimation = false
     @AppStorage("scrollKeys", store: Config.defaults) private var scrollKeys = Config.defaultScrollKeys
     @AppStorage("scrollPxPerMs", store: Config.defaults) private var scrollSpeed = Config.defaultScrollPxPerMs
     @AppStorage("dashMultiplier", store: Config.defaults) private var dashMultiplier = Config.defaultDashMultiplier
@@ -99,6 +100,10 @@ struct SettingsView: View {
     @AppStorage("focusMotion", store: Config.defaults) private var focusMotion = FocusMotion.none.rawValue
     @AppStorage("focusMotionSpeed", store: Config.defaults) private var focusMotionSpeed = 1.0
     @AppStorage("glassRefraction", store: Config.defaults) private var glassRefraction = 1.0
+    @AppStorage("borderRefraction", store: Config.defaults) private var borderRefraction = 1.0
+    @AppStorage("slabRefraction", store: Config.defaults) private var slabRefraction = 1.0
+    @AppStorage("slabBezel", store: Config.defaults) private var slabBezel = Config.defaultSlabBezel
+    @AppStorage("slabFullRefraction", store: Config.defaults) private var slabFullRefraction = true
     @AppStorage("glassSpecular", store: Config.defaults) private var glassSpecular = 1.0
     @AppStorage("glassBlur", store: Config.defaults) private var glassBlur = 1.0
     @AppStorage("glassTint", store: Config.defaults) private var glassTint = 1.0
@@ -144,180 +149,33 @@ struct SettingsView: View {
     /// 로그인 항목 등록은 .app 번들로 실행했을 때만 된다
     private static let isAppBundle = Bundle.main.bundleURL.pathExtension == "app"
 
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Hanmium 사용", isOn: $enabled)
-                Toggle("로그인 시 자동 실행", isOn: $launchAtLogin)
-                    .disabled(!Self.isAppBundle)
-                if !Self.isAppBundle {
-                    note("Hanmium.app 으로 실행했을 때만 바꿀 수 있습니다.")
-                }
-                if usesGlass, !CGPreflightScreenCaptureAccess() {
-                    note("리퀴드 글래스가 뒤 화면을 굴절시키려면 화면 기록 권한이 필요합니다. "
-                        + "없으면 옅은 흐림과 가장자리 빛만 그립니다. 허용한 뒤 Hanmium 을 다시 실행하세요.")
-                    HStack {
-                        Button("화면 기록 권한 열기", action: openScreenCaptureSettings)
-                        Button("Hanmium 다시 실행", action: relaunch).disabled(!Self.isAppBundle)
-                    }
-                }
-            }
-            Section("단축키") {
-                shortcutRow(.labels, isOn: $labelsOn, spec: $labelsKey)
-                shortcutRow(.search, isOn: $searchOn, spec: $searchKey)
-                shortcutRow(.scroll, isOn: $scrollOn, spec: $scrollKey)
-                note("버튼을 누른 뒤 새 키 조합을 입력하세요. Esc 는 취소입니다.")
-            }
-            Section("라벨 클릭") {
-                TextField("라벨 문자", text: $labelCharacters)
-                note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요. 기본값은 Vimium 과 같은 sadfjklewcmpgh 입니다. "
-                    + "라벨이 적으면 한 글자, 많으면 일부만 두 글자가 됩니다.")
-                Toggle("라벨이 닫힐 때 서서히 사라지기", isOn: $labelAnimation)
-                note("끄면 라벨을 고르거나 Esc 를 누르는 즉시 사라집니다.")
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("라벨 색상")
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 4)], alignment: .leading, spacing: 6) {
-                        ForEach(LabelTheme.all, id: \.id) { theme in
-                            Button { labelTheme = theme.id } label: {
-                                ThemeSwatch(theme: theme, selected: theme.id == labelTheme)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    note("스크롤 영역 테두리와 검색 결과 강조도 이 색을 따릅니다.")
-                }
-                if LabelTheme.all.first(where: { $0.id == labelTheme })?.glass != nil {
-                    GlassPreview(refraction: glassRefraction, specular: glassSpecular, blur: glassBlur, tint: glassTint,
-                                 theme: labelTheme)
-                    percentSlider("굴절 강도", value: $glassRefraction, in: 0...2)
-                    percentSlider("반사도", value: $glassSpecular, in: 0...2)
-                    percentSlider("흐림", value: $glassBlur, in: 0...2)
-                    percentSlider("색 진하기", value: $glassTint, in: 0...2)
-                    note("굴절 강도는 가장자리가 뒤 화면을 휘는 정도, 반사도는 가장자리에 맺히는 빛, "
-                        + "흐림은 글자 뒤를 흐리는 정도, 색 진하기는 밝게(어두운 유리는 어둡게) 덮는 정도입니다. 100% 가 기본.")
+    /// 설정 창 탭: 일반(켜기·앱별 사용·설정 파일), 라벨(라벨·검색 모드), 스크롤(스크롤 모드)
+    enum Tab: String, CaseIterable {
+        case general = "일반", labels = "라벨", scroll = "스크롤"
+    }
+    @AppStorage("settingsTab", store: Config.defaults) private var tab = Tab.general.rawValue
+    /// 문서 이미지를 만들 때(Tools/DocImages) 탭마다 그리려고 정한다
+    static var forcedTab: Tab?
+    private var currentTab: Tab { Self.forcedTab ?? Tab(rawValue: tab) ?? .general }
 
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: Binding(get: { currentTab.rawValue }, set: { tab = $0 })) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding(.top, 12)
+            Form {
+                switch currentTab {
+                case .general: generalTab
+                case .labels: labelsTab
+                case .scroll: scrollTab
                 }
             }
-            Section("스크롤") {
-                TextField("방향 키 (← ↓ ↑ →)", text: $scrollKeys)
-                LabeledContent("속도") {
-                    Slider(value: $scrollSpeed, in: 0.3...4, step: 0.1)
-                    Text(String(format: "%.1f", scrollSpeed)).monospacedDigit().frame(width: 32)
-                }
-                LabeledContent("Shift 가속 배수") {
-                    Slider(value: $dashMultiplier, in: 1.5...6, step: 0.5)
-                    Text(String(format: "%.1f", dashMultiplier)).monospacedDigit().frame(width: 32)
-                }
-                LabeledContent("움직임 애니메이션") {
-                    Slider(value: $animationScale, in: 0...2, step: 0.25)
-                    Text(animationScale == 0 ? "끔" : "\(Int(animationScale * 100))%")
-                        .monospacedDigit().frame(width: 40)
-                }
-                note("d/u 반 페이지 이동과 누르고 뗄 때의 가속·감속에 걸리는 시간입니다. 끄면 바로 이동합니다. 반 페이지 이동은 몇 프레임 만에 건너뛰어 끊겨 보이지 않게 0.12초보다 짧아지지 않습니다.")
-                LabeledContent("터미널 휠 한 칸") {
-                    HStack(spacing: 4) {
-                        NumberField(value: $terminalNotchLines, range: 1...10).frame(width: 36)
-                        Text("줄")
-                        Stepper("", value: $terminalNotchLines, in: 1...10).labelsHidden()
-                    }
-                }
-                note("WezTerm 에서 Claude Code·vim 같은 전체 화면 앱은 휠 한 칸마다 앱이 정한 만큼 움직입니다. "
-                    + "너무 빠르면 늘리고, 뚝뚝 끊겨 보이면 줄이세요.")
-            }
-            Section("스크롤 영역 테두리") {
-                Toggle("테두리 표시", isOn: $scrollBorderShown)
-                Picker("모양", selection: $scrollBorderStyle) {
-                    Text("리퀴드 글래스").tag(AreaStyle.glass.rawValue)
-                    Text("실선").tag(AreaStyle.line.rawValue)
-                }
-                .disabled(!scrollBorderShown)
-                Picker("영역 이동", selection: $focusMotion) {
-                    Text("늘어나는 물방울").tag(FocusMotion.stretch.rawValue)
-                    Text("날아가는 물방울").tag(FocusMotion.hop.rawValue)
-                    Text("없음").tag(FocusMotion.none.rawValue)
-                }
-                .disabled(!scrollBorderShown)
-                percentSlider("영역 이동 속도", value: $focusMotionSpeed, in: 0.25...3)
-                    .disabled(!scrollBorderShown || focusMotion == FocusMotion.none.rawValue)
-                note("숫자·Tab 으로 다른 영역을 고를 때 테두리가 옮겨가는 모양입니다. 늘어나는 물방울은 가는 쪽이 먼저 "
-                    + "늘어났다가 출렁이며 멈추고, 날아가는 물방울은 작은 물방울로 뭉쳐 날아간 뒤 퍼집니다. "
-                    + "속도는 100% 가 기본이고 높을수록 빠릅니다.")
-                LabeledContent("두께") {
-                    Slider(value: $scrollBorderWidth, in: 1...8, step: 1)
-                    Text("\(Int(scrollBorderWidth))px").monospacedDigit().frame(width: 32)
-                }
-                .disabled(!scrollBorderShown)
-                Toggle("라벨 색상에 맞추기", isOn: borderFollowsTheme)
-                    .disabled(!scrollBorderShown)
-                if !scrollBorderColor.isEmpty {
-                    ColorPicker("테두리 색", selection: borderColor, supportsOpacity: false)
-                        .disabled(!scrollBorderShown)
-                }
-                note("리퀴드 글래스는 두께에 맞춰 영역 바깥을 얇은 유리 막대로 감쌉니다(기본 3 → 4pt). "
-                    + "테두리는 스크롤하는 창 바로 위에만 그려져서, 다른 앱 창이 덮으면 같이 가려집니다.")
-            }
-            Section("고르지 않은 스크롤 영역") {
-                Toggle("표시", isOn: $inactiveAreaShown)
-                Picker("모양", selection: $inactiveAreaStyle) {
-                    Text("리퀴드 글래스").tag(AreaStyle.glass.rawValue)
-                    Text("점선").tag(AreaStyle.line.rawValue)
-                }
-                .disabled(!inactiveAreaShown)
-                Toggle("스크롤 테두리 색에 맞추기", isOn: inactiveFollowsBorder)
-                    .disabled(!inactiveAreaShown)
-                if !inactiveAreaColor.isEmpty {
-                    ColorPicker("색", selection: inactiveColor, supportsOpacity: false)
-                        .disabled(!inactiveAreaShown)
-                }
-                percentSlider("점선 진하기", value: $inactiveLineOpacity, in: 0...1)
-                    .disabled(!inactiveAreaShown || inactiveAreaStyle == AreaStyle.glass.rawValue)
-                percentSlider(inactiveAreaStyle == AreaStyle.glass.rawValue ? "유리 색 진하기" : "채우기 진하기",
-                              value: $inactiveFillOpacity, in: 0...0.6)
-                    .disabled(!inactiveAreaShown)
-                note("같은 창에서 숫자·Tab 으로 옮겨갈 수 있는 다른 영역(WezTerm·VS Code 분할 창 등)입니다. "
-                    + "리퀴드 글래스는 영역 위에 유리판을 얹어 가장자리가 굴절되고 빛나며, 점선은 점선과 옅은 칠로 구분합니다.")
-            }
-            Section("앱별 사용") {
-                Picker("방식", selection: $appFilterMode) {
-                    Text("모든 앱에서 사용하고, 목록의 앱에서만 끄기").tag(AppFilterMode.exclude.rawValue)
-                    Text("목록의 앱에서만 사용").tag(AppFilterMode.include.rawValue)
-                }
-                .pickerStyle(.radioGroup)
-                ForEach(listedIDs, id: \.self) { id in
-                    HStack {
-                        Image(nsImage: AppInfo.icon(id)).resizable().frame(width: 18, height: 18)
-                        Text(AppInfo.name(id))
-                        Spacer()
-                        Button { removeApp(id) } label: { Image(systemName: "minus.circle.fill") }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Button("앱 추가…", action: addApps)
-                note((includeMode
-                    ? "목록의 앱이 앞에 있을 때만 단축키가 동작하고, 다른 앱에서는 키가 그 앱으로 그대로 갑니다. "
-                        + "목록이 비어 있으면 어디서도 동작하지 않습니다. "
-                    : "목록의 앱이 앞에 있으면 Hanmium 단축키가 꺼지고 키가 그 앱으로 그대로 갑니다. ")
-                    + "메뉴 막대 아이콘에서 지금 쓰는 앱을 바로 넣거나 뺄 수도 있습니다.")
-            }
-            Section("고급") {
-                Toggle("웹 페이지에서 빠른 검색 API 사용", isOn: $useSearchPredicate)
-                note("끄면 웹 페이지의 요소를 하나씩 훑어서 느리지만 더 많이 찾을 수 있습니다.")
-                HStack {
-                    Button("설정 내보내기…", action: exportSettings)
-                    Button("설정 가져오기…", action: importSettings)
-                }
-                note("단축키·라벨·스크롤·유리·앱별 사용 설정을 JSON 파일로 저장하거나 불러옵니다. "
-                    + "불러오면 파일 속 설정 그대로 맞춥니다(로그인 시 자동 실행은 그대로 둡니다).")
-            }
-            Section {
-                HStack {
-                    Spacer()
-                    Button("기본값으로 되돌리기", action: resetToDefaults)
-                }
-            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
         .frame(width: 460, height: Self.height)
         .onChange(of: enabled) { _ in onHotkeysChanged() }
         .onChange(of: labelsOn) { _ in onHotkeysChanged() }
@@ -329,6 +187,217 @@ struct SettingsView: View {
         .onChange(of: launchAtLogin, perform: setLaunchAtLogin)
         .onChange(of: appFilterMode) { _ in onHotkeysChanged() }
         .onChange(of: appList) { _ in onHotkeysChanged() }
+    }
+
+    // MARK: 일반
+
+    @ViewBuilder private var generalTab: some View {
+        Section {
+            Toggle("Hanmium 사용", isOn: $enabled)
+            Toggle("로그인 시 자동 실행", isOn: $launchAtLogin)
+                .disabled(!Self.isAppBundle)
+            if !Self.isAppBundle {
+                note("Hanmium.app 으로 실행했을 때만 바꿀 수 있습니다.")
+            }
+            if usesGlass, !CGPreflightScreenCaptureAccess() {
+                note("리퀴드 글래스가 뒤 화면을 굴절시키려면 화면 기록 권한이 필요합니다. "
+                    + "없으면 옅은 흐림과 가장자리 빛만 그립니다. 허용한 뒤 Hanmium 을 다시 실행하세요.")
+                HStack {
+                    Button("화면 기록 권한 열기", action: openScreenCaptureSettings)
+                    Button("Hanmium 다시 실행", action: relaunch).disabled(!Self.isAppBundle)
+                }
+            }
+        }
+        Section("앱별 사용") {
+            Picker("방식", selection: $appFilterMode) {
+                Text("모든 앱에서 사용하고, 목록의 앱에서만 끄기").tag(AppFilterMode.exclude.rawValue)
+                Text("목록의 앱에서만 사용").tag(AppFilterMode.include.rawValue)
+            }
+            .pickerStyle(.radioGroup)
+            ForEach(listedIDs, id: \.self) { id in
+                HStack {
+                    Image(nsImage: AppInfo.icon(id)).resizable().frame(width: 18, height: 18)
+                    Text(AppInfo.name(id))
+                    Spacer()
+                    Button { removeApp(id) } label: { Image(systemName: "minus.circle.fill") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button("앱 추가…", action: addApps)
+            note((includeMode
+                ? "목록의 앱이 앞에 있을 때만 단축키가 동작하고, 다른 앱에서는 키가 그 앱으로 그대로 갑니다. "
+                    + "목록이 비어 있으면 어디서도 동작하지 않습니다. "
+                : "목록의 앱이 앞에 있으면 Hanmium 단축키가 꺼지고 키가 그 앱으로 그대로 갑니다. ")
+                + "메뉴 막대 아이콘에서 지금 쓰는 앱을 바로 넣거나 뺄 수도 있습니다.")
+        }
+        Section("설정 파일") {
+            HStack {
+                Button("설정 내보내기…", action: exportSettings)
+                Button("설정 가져오기…", action: importSettings)
+            }
+            note("단축키·라벨·스크롤·유리·앱별 사용 설정을 JSON 파일로 저장하거나 불러옵니다. "
+                + "불러오면 파일 속 설정 그대로 맞춥니다(로그인 시 자동 실행은 그대로 둡니다).")
+        }
+        Section {
+            HStack {
+                Spacer()
+                Button("기본값으로 되돌리기", action: resetToDefaults)
+            }
+            note("세 탭의 설정을 모두 처음 값으로 돌립니다. 앱별 사용 목록은 그대로 둡니다.")
+        }
+    }
+
+    // MARK: 라벨
+
+    @ViewBuilder private var labelsTab: some View {
+        Section("단축키") {
+            shortcutRow(.labels, isOn: $labelsOn, spec: $labelsKey)
+            shortcutRow(.search, isOn: $searchOn, spec: $searchKey)
+            note("버튼을 누른 뒤 새 키 조합을 입력하세요. Esc 는 취소입니다.")
+        }
+        Section("라벨") {
+            TextField("라벨 문자", text: $labelCharacters)
+            note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요. 기본값은 Vimium 과 같은 sadfjklewcmpgh 입니다. "
+                + "라벨이 적으면 한 글자, 많으면 일부만 두 글자가 됩니다.")
+            Toggle("닫힐 때 서서히 사라지기", isOn: $labelAnimation)
+            note("끄면 라벨을 고르거나 Esc 를 누르는 즉시 사라집니다.")
+        }
+        Section("라벨 색상") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 4)], alignment: .leading, spacing: 6) {
+                ForEach(LabelTheme.all, id: \.id) { theme in
+                    Button { labelTheme = theme.id } label: {
+                        ThemeSwatch(theme: theme, selected: theme.id == labelTheme)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            note("검색 결과 강조도 이 색을 따릅니다. 스크롤 테두리는 스크롤 탭에서 이 색을 따를지 고릅니다.")
+        }
+        if LabelTheme.all.first(where: { $0.id == labelTheme })?.glass != nil {
+            Section("유리 라벨") {
+                GlassPreview(refraction: glassRefraction, specular: glassSpecular, blur: glassBlur, tint: glassTint,
+                             theme: labelTheme)
+                percentSlider("굴절 강도", value: $glassRefraction, in: 0...2)
+                percentSlider("반사도", value: $glassSpecular, in: 0...2)
+                percentSlider("흐림", value: $glassBlur, in: 0...2)
+                percentSlider("색 진하기", value: $glassTint, in: 0...2)
+                note("굴절 강도는 가장자리가 뒤 화면을 휘는 정도, 반사도는 가장자리에 맺히는 빛, "
+                    + "흐림은 글자 뒤를 흐리는 정도, 색 진하기는 밝게(어두운 유리는 어둡게) 덮는 정도입니다. 100% 가 기본. "
+                    + "라벨에만 쓰이고, 스크롤 테두리 유리는 스크롤 탭에서 따로 조절합니다.")
+            }
+        }
+        Section("웹 페이지") {
+            Toggle("빠른 검색 API 사용", isOn: $useSearchPredicate)
+            note("끄면 웹 페이지의 요소를 하나씩 훑어서 느리지만 더 많이 찾을 수 있습니다.")
+        }
+    }
+
+    // MARK: 스크롤
+
+    @ViewBuilder private var scrollTab: some View {
+        Section("단축키") {
+            shortcutRow(.scroll, isOn: $scrollOn, spec: $scrollKey)
+            note("버튼을 누른 뒤 새 키 조합을 입력하세요. Esc 는 취소입니다.")
+        }
+        Section("움직임") {
+            TextField("방향 키 (← ↓ ↑ →)", text: $scrollKeys)
+            LabeledContent("속도") {
+                Slider(value: $scrollSpeed, in: 0.3...4, step: 0.1)
+                Text(String(format: "%.1f", scrollSpeed)).monospacedDigit().frame(width: 32)
+            }
+            LabeledContent("Shift 가속 배수") {
+                Slider(value: $dashMultiplier, in: 1.5...6, step: 0.5)
+                Text(String(format: "%.1f", dashMultiplier)).monospacedDigit().frame(width: 32)
+            }
+            LabeledContent("움직임 애니메이션") {
+                Slider(value: $animationScale, in: 0...2, step: 0.25)
+                Text(animationScale == 0 ? "끔" : "\(Int(animationScale * 100))%")
+                    .monospacedDigit().frame(width: 40)
+            }
+            note("d/u 반 페이지 이동과 누르고 뗄 때의 가속·감속에 걸리는 시간입니다. 끄면 바로 이동합니다. 반 페이지 이동은 몇 프레임 만에 건너뛰어 끊겨 보이지 않게 0.12초보다 짧아지지 않습니다.")
+            LabeledContent("터미널 휠 한 칸") {
+                HStack(spacing: 4) {
+                    NumberField(value: $terminalNotchLines, range: 1...10).frame(width: 36)
+                    Text("줄")
+                    Stepper("", value: $terminalNotchLines, in: 1...10).labelsHidden()
+                }
+            }
+            note("WezTerm 에서 Claude Code·vim 같은 전체 화면 앱은 휠 한 칸마다 앱이 정한 만큼 움직입니다. "
+                + "너무 빠르면 늘리고, 뚝뚝 끊겨 보이면 줄이세요.")
+        }
+        Section("고른 영역 테두리") {
+            Toggle("테두리 표시", isOn: $scrollBorderShown)
+            Picker("모양", selection: $scrollBorderStyle) {
+                Text("리퀴드 글래스").tag(AreaStyle.glass.rawValue)
+                Text("실선").tag(AreaStyle.line.rawValue)
+            }
+            .disabled(!scrollBorderShown)
+            LabeledContent("두께") {
+                Slider(value: $scrollBorderWidth, in: 1...8, step: 1)
+                Text("\(Int(scrollBorderWidth))px").monospacedDigit().frame(width: 32)
+            }
+            .disabled(!scrollBorderShown)
+            percentSlider("굴절 강도", value: $borderRefraction, in: 0...2)
+                .disabled(!scrollBorderShown || scrollBorderStyle != AreaStyle.glass.rawValue)
+            Toggle("라벨 색상에 맞추기", isOn: borderFollowsTheme)
+                .disabled(!scrollBorderShown)
+            if !scrollBorderColor.isEmpty {
+                ColorPicker("테두리 색", selection: borderColor, supportsOpacity: false)
+                    .disabled(!scrollBorderShown)
+            }
+            Toggle("닫힐 때 서서히 사라지기", isOn: $scrollAnimation)
+                .disabled(!scrollBorderShown)
+            note("리퀴드 글래스는 두께에 맞춰 영역 바깥을 얇은 유리 막대로 감쌉니다(기본 3 → 4pt). "
+                + "테두리는 스크롤하는 창 바로 위에만 그려져서, 다른 앱 창이 덮으면 같이 가려집니다. "
+                + "서서히 사라지기를 켜면 앱을 바꿀 때 지난 테두리가 0.2초쯤 남습니다.")
+            Picker("영역 이동", selection: $focusMotion) {
+                Text("늘어나는 물방울").tag(FocusMotion.stretch.rawValue)
+                Text("날아가는 물방울").tag(FocusMotion.hop.rawValue)
+                Text("없음").tag(FocusMotion.none.rawValue)
+            }
+            .disabled(!scrollBorderShown)
+            percentSlider("영역 이동 속도", value: $focusMotionSpeed, in: 0.25...3)
+                .disabled(!scrollBorderShown || focusMotion == FocusMotion.none.rawValue)
+            note("숫자·Tab 으로 다른 영역을 고를 때 테두리가 옮겨가는 모양입니다. 늘어나는 물방울은 가는 쪽이 먼저 "
+                + "늘어났다가 출렁이며 멈추고, 날아가는 물방울은 작은 물방울로 뭉쳐 날아간 뒤 퍼집니다. "
+                + "속도는 100% 가 기본이고 높을수록 빠릅니다.")
+        }
+        Section("고르지 않은 영역") {
+            Toggle("표시", isOn: $inactiveAreaShown)
+            Picker("모양", selection: $inactiveAreaStyle) {
+                Text("리퀴드 글래스").tag(AreaStyle.glass.rawValue)
+                Text("점선").tag(AreaStyle.line.rawValue)
+            }
+            .disabled(!inactiveAreaShown)
+            Toggle("스크롤 테두리 색에 맞추기", isOn: inactiveFollowsBorder)
+                .disabled(!inactiveAreaShown)
+            if !inactiveAreaColor.isEmpty {
+                ColorPicker("색", selection: inactiveColor, supportsOpacity: false)
+                    .disabled(!inactiveAreaShown)
+            }
+            percentSlider("점선 진하기", value: $inactiveLineOpacity, in: 0...1)
+                .disabled(!inactiveAreaShown || inactiveAreaStyle == AreaStyle.glass.rawValue)
+            percentSlider(inactiveAreaStyle == AreaStyle.glass.rawValue ? "유리 색 진하기" : "채우기 진하기",
+                          value: $inactiveFillOpacity, in: 0...0.6)
+                .disabled(!inactiveAreaShown)
+            if inactiveAreaStyle == AreaStyle.glass.rawValue {
+                percentSlider("굴절 강도", value: $slabRefraction, in: 0...2)
+                    .disabled(!inactiveAreaShown)
+                Toggle("영역 전체 굴절", isOn: $slabFullRefraction)
+                    .disabled(!inactiveAreaShown)
+                LabeledContent("굴절 범위") {
+                    Slider(value: $slabBezel, in: 4...80, step: 2)
+                    Text("\(Int(slabBezel))pt").monospacedDigit().frame(width: 40)
+                }
+                .disabled(!inactiveAreaShown || slabFullRefraction)
+            }
+            note("같은 창에서 숫자·Tab 으로 옮겨갈 수 있는 다른 영역(WezTerm·VS Code 분할 창 등)입니다. "
+                + "리퀴드 글래스는 영역 위에 유리판을 얹어 가장자리가 굴절되고 빛나며, 점선은 점선과 옅은 칠로 구분합니다. "
+                + "영역 전체 굴절을 켜면 영역 전체가 볼록렌즈처럼 휘고(가장자리 빛은 바깥쪽에만), 끄면 굴절 범위만큼 "
+                + "가장자리에서 안쪽으로 휩니다(작은 영역은 짧은 변의 절반까지). 굴절 강도는 휘는 정도입니다. "
+                + "휘어 보이는 내용은 스크롤 모드 동안 1초마다 새 화면으로 바뀝니다.")
+        }
     }
 
     private func addApps() {
@@ -441,6 +510,7 @@ struct SettingsView: View {
         scrollKey = ModeKind.scroll.defaultHotkey
         labelCharacters = Config.defaultLabelCharacters
         labelAnimation = false
+        scrollAnimation = false
         scrollKeys = Config.defaultScrollKeys
         scrollSpeed = Config.defaultScrollPxPerMs
         dashMultiplier = Config.defaultDashMultiplier
@@ -459,6 +529,10 @@ struct SettingsView: View {
         glassSpecular = 1
         glassBlur = 1
         glassTint = 1
+        borderRefraction = 1
+        slabRefraction = 1
+        slabBezel = Config.defaultSlabBezel
+        slabFullRefraction = true
         inactiveAreaStyle = AreaStyle.glass.rawValue
         inactiveAreaColor = ""
         inactiveLineOpacity = Config.defaultInactiveLineOpacity

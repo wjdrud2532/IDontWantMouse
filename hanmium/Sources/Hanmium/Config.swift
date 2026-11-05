@@ -121,6 +121,8 @@ enum Config {
     /// 스크롤 움직임 애니메이션 배율. 0 이면 끔(바로 이동), 1 이 기본, 2 는 두 배로 느긋하게.
     /// 라벨이 닫힐 때 서서히 사라지게 할지 (macOS 기본 창 효과, 약 0.2초). 끄면 바로 사라진다.
     static var labelAnimation: Bool { defaults.bool(forKey: "labelAnimation") }
+    /// 스크롤 테두리가 닫힐 때 서서히 사라지게 할지 (라벨과 따로). 켜면 앱을 바꿀 때 지난 테두리가 잠깐 남는다.
+    static var scrollAnimation: Bool { defaults.bool(forKey: "scrollAnimation") }
 
     static var animationScale: Double {
         min(max(defaults.object(forKey: "animationScale") as? Double ?? 1, 0), 2)
@@ -146,6 +148,18 @@ enum Config {
     static var glassSpecular: CGFloat { factor("glassSpecular") }
     static var glassBlur: CGFloat { factor("glassBlur") }
     static var glassTint: CGFloat { factor("glassTint") }
+
+    /// 스크롤 모드 유리는 라벨(glassRefraction)과 따로 조절한다(0~2, 1 이 기본).
+    /// borderRefraction: 고른 영역을 감싼 유리 막대, slabRefraction: 고르지 않은 영역 유리판.
+    static var borderRefraction: CGFloat { factor("borderRefraction") }
+    static var slabRefraction: CGFloat { factor("slabRefraction") }
+    /// 고르지 않은 영역 유리판이 영역 전체에서 휘는지(볼록렌즈). 끄면 가장자리 slabBezel 폭 안에서만 휜다.
+    static var slabFullRefraction: Bool { defaults.object(forKey: "slabFullRefraction") as? Bool ?? true }
+    /// 고르지 않은 영역 유리판이 휘는 범위(영역 전체가 아닐 때): 가장자리에서 안쪽으로 몇 pt 까지
+    static let defaultSlabBezel = 40.0
+    static var slabBezel: CGFloat {
+        CGFloat(min(max(defaults.object(forKey: "slabBezel") as? Double ?? defaultSlabBezel, 4), 80))
+    }
 
     private static func factor(_ key: String) -> CGFloat {
         (defaults.object(forKey: key) as? Double).map { CGFloat(min(max($0, 0), 2)) } ?? 1
@@ -209,11 +223,11 @@ enum SettingsTransfer {
     static let keys: [String] = [
         "enabled", "appFilterMode", "appList",
         "clickHotkey", "searchHotkey", "scrollHotkey", "clickEnabled", "searchEnabled", "scrollEnabled",
-        "labelCharacters", "labelAnimation", "labelTheme", "glassRefraction", "glassSpecular", "glassBlur", "glassTint",
+        "labelCharacters", "labelAnimation", "scrollAnimation", "labelTheme", "glassRefraction", "glassSpecular", "glassBlur", "glassTint",
         "useSearchPredicate",
         "scrollKeys", "scrollPxPerMs", "dashMultiplier", "animationScale", "terminalNotchLines",
         "scrollBorderShown", "scrollBorderStyle", "scrollBorderWidth", "scrollBorderColor",
-        "focusMotion", "focusMotionSpeed",
+        "focusMotion", "focusMotionSpeed", "borderRefraction", "slabRefraction", "slabFullRefraction", "slabBezel",
         "inactiveAreaShown", "inactiveAreaStyle", "inactiveAreaColor", "inactiveLineOpacity", "inactiveFillOpacity",
     ]
 

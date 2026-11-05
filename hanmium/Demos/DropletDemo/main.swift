@@ -204,7 +204,7 @@ final class DemoView: NSView {
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
             Draw.glassArea(p, selected: .zero, color: Config.inactiveAreaColor, fillOpacity: Config.inactiveFillOpacity,
                            edge: Draw.glassAreaEdge(p, color: Config.inactiveAreaColor,
-                                                    fillOpacity: Config.inactiveFillOpacity, bezel: Draw.slabBezel(3)))
+                                                    fillOpacity: Config.inactiveFillOpacity))
             ctx.endTransparencyLayer()
             ctx.restoreGState()
         }

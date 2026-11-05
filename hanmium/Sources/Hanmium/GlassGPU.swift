@@ -15,19 +15,22 @@ final class GlassGPU {
     private let luma: MTLComputePipelineState
     private let pill: MTLComputePipelineState
     private let edge: MTLComputePipelineState
+    private let hole: MTLComputePipelineState
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
               let library = try? device.makeLibrary(source: Self.source, options: nil),
               let luma = library.makeFunction(name: "pillLuma").flatMap({ try? device.makeComputePipelineState(function: $0) }),
               let pill = library.makeFunction(name: "pillGlass").flatMap({ try? device.makeComputePipelineState(function: $0) }),
-              let edge = library.makeFunction(name: "edgeGlass").flatMap({ try? device.makeComputePipelineState(function: $0) })
+              let edge = library.makeFunction(name: "edgeGlass").flatMap({ try? device.makeComputePipelineState(function: $0) }),
+              let hole = library.makeFunction(name: "holeGlass").flatMap({ try? device.makeComputePipelineState(function: $0) })
         else { return nil }
         self.device = device
         self.queue = queue
         self.luma = luma
         self.pill = pill
         self.edge = edge
+        self.hole = hole
     }
 
     /// 화면 사진을 GPU 텍스처로 올린다 (사진마다 한 번, 1920x1080 에 1~2ms)
@@ -48,7 +51,7 @@ final class GlassGPU {
         var originX: Float, originY: Float, width: Float, height: Float
         var atlasX: Float, atlasY: Float, radius: Float, bezel: Float
         var thickness: Float, blur: Float, tint: Float, specular: Float
-        var saturation: Float, forceDark: Float, pad0: Float = 0, pad1: Float = 0
+        var saturation: Float, forceDark: Float, power: Float, pad1: Float = 0
     }
 
     /// 라벨 여러 개를 한 번에 그린다. rects 는 사진 픽셀 좌표. 결과는 rects 와 같은 순서.
@@ -75,7 +78,8 @@ final class GlassGPU {
                                 bezel: radius * Float(LiquidGlass.labelBezel),
                                 thickness: radius * Float(LiquidGlass.labelThickness) * refraction,
                                 blur: (radius * 0.3 * blurAmount).rounded(), tint: tint, specular: specular,
-                                saturation: Float(LiquidGlass.saturation), forceDark: dark ? 1 : 0))
+                                saturation: Float(LiquidGlass.saturation), forceDark: dark ? 1 : 0,
+                                power: Float(LiquidGlass.labelPower)))
             x += w + 1
             rowHeight = max(rowHeight, h)
         }
@@ -127,19 +131,21 @@ final class GlassGPU {
         var halfX: Float, halfY: Float, radius: Float, bezel: Float
         var ring: Float, tintR: Float, tintG: Float, tintB: Float
         var tintAlpha: Float, saturation: Float, specular: Float, fill: Float
-        var thickness: Float, pad0: Float = 0, pad1: Float = 0, pad2: Float = 0
+        var thickness: Float, power: Float, rim: Float = 0, dome: Float = 0
     }
 
     /// LiquidGlass.renderEdge 와 같은 그림을 GPU 로. frame·크기는 사진 픽셀 기준으로 계산해 넘긴다.
     func renderEdge(frameOrigin: CGPoint, size: (Int, Int), half: CGSize, radius: CGFloat, bezel: CGFloat, ring: Bool,
                     tint: (CGFloat, CGFloat, CGFloat), tintAlpha: CGFloat, saturation: CGFloat, specular: CGFloat,
-                    fill: CGFloat, thickness: CGFloat, from source: MTLTexture) -> CGImage? {
+                    fill: CGFloat, thickness: CGFloat, power: CGFloat, rim: CGFloat = 0, dome: Bool = false,
+                    from source: MTLTexture) -> CGImage? {
         let (w, h) = size
         var job = EdgeJob(originX: Float(frameOrigin.x), originY: Float(frameOrigin.y), width: Float(w), height: Float(h),
                           halfX: Float(half.width), halfY: Float(half.height), radius: Float(radius), bezel: Float(bezel),
                           ring: ring ? 1 : 0, tintR: Float(tint.0), tintG: Float(tint.1), tintB: Float(tint.2),
                           tintAlpha: Float(tintAlpha), saturation: Float(saturation), specular: Float(specular),
-                          fill: Float(fill), thickness: Float(thickness))
+                          fill: Float(fill), thickness: Float(thickness), power: Float(power), rim: Float(rim),
+                          dome: dome ? 1 : 0)
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false)
         desc.usage = .shaderWrite
         desc.storageMode = .shared
@@ -149,6 +155,40 @@ final class GlassGPU {
         enc.setTexture(source, index: 0)
         enc.setTexture(out, index: 1)
         enc.setBytes(&job, length: MemoryLayout<EdgeJob>.stride, index: 0)
+        enc.dispatchThreads(MTLSize(width: w, height: h, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+        enc.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        return Self.readImage(out, width: w, height: h)
+    }
+
+    // MARK: 움직이는 테두리 모양을 뺀 유리판
+
+    /// 셰이더의 Hole 과 같은 배치(float 24개)
+    struct HoleJob {
+        var paneX: Float, paneY: Float, paneW: Float, paneH: Float
+        var paneRadius: Float, holeCX: Float, holeCY: Float, holeHX: Float
+        var holeHY: Float, holeRadius: Float, bezel: Float, thickness: Float
+        var power: Float, smooth: Float, tintAlpha: Float, saturation: Float
+        var tintR: Float, tintG: Float, tintB: Float, specular: Float
+        /// dome 이면 thickness 는 영역 전체 볼록렌즈 두께이고, hole 가장자리는 holeBezel·holeThickness 띠로 따로 휜다
+        var rim: Float = 0, dome: Float = 0, holeBezel: Float = 0, holeThickness: Float = 0
+    }
+
+    /// 둥근 사각형(영역)에서 둥근 사각형(hole)을 뺀 모양의 유리판을 그린다. 값은 모두 사진 픽셀 기준이고 hole 은
+    /// 영역 왼쪽 위 기준. 띠 안쪽은 굴절 없이 옅은 색(tintAlpha)만 칠해서 한 장에 담는다.
+    func renderHole(_ job: HoleJob, from source: MTLTexture) -> CGImage? {
+        let w = Int(job.paneW), h = Int(job.paneH)
+        var job = job
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false)
+        desc.usage = .shaderWrite
+        desc.storageMode = .shared
+        guard w > 4, h > 4, let out = device.makeTexture(descriptor: desc), let cmd = queue.makeCommandBuffer(),
+              let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(hole)
+        enc.setTexture(source, index: 0)
+        enc.setTexture(out, index: 1)
+        enc.setBytes(&job, length: MemoryLayout<HoleJob>.stride, index: 0)
         enc.dispatchThreads(MTLSize(width: w, height: h, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         enc.endEncoding()
         cmd.commit()
@@ -177,7 +217,16 @@ final class GlassGPU {
         float originX, originY, width, height;
         float atlasX, atlasY, radius, bezel;
         float thickness, blur, tint, specular;
-        float saturation, forceDark, pad0, pad1;
+        float saturation, forceDark, power, pad1;
+    };
+
+    struct Hole {
+        float paneX, paneY, paneW, paneH;
+        float paneRadius, holeCX, holeCY, holeHX;
+        float holeHY, holeRadius, bezel, thickness;
+        float power, smooth, tintAlpha, saturation;
+        float tintR, tintG, tintB, specular;
+        float rim, dome, holeBezel, holeThickness;
     };
 
     struct Edge {
@@ -185,7 +234,7 @@ final class GlassGPU {
         float halfX, halfY, radius, bezel;
         float ring, tintR, tintG, tintB;
         float tintAlpha, saturation, specular, fill;
-        float thickness, pad0, pad1, pad2;
+        float thickness, power, rim, dome;
     };
 
     constant float refractiveIndex = 1.5;
@@ -193,14 +242,25 @@ final class GlassGPU {
     constant float3 lumaWeights = float3(0.2126, 0.7152, 0.0722);
     constexpr sampler linearClamp(coord::pixel, filter::linear, address::clamp_to_edge);
 
-    // 볼록 스퀘어클 단면 + 스넬 법칙: 가장자리에서 t(0~1) 들어온 자리의 이동 거리
-    float refractShift(float t, float bezel, float thickness) {
+    // 볼록 단면 u^p + (h/thickness)^p = 1 (p = 4 면 스퀘어클) + 스넬 법칙: 가장자리에서 t(0~1) 들어온 자리의 이동 거리
+    float refractShift(float t, float bezel, float thickness, float p) {
         float u = 1.0 - t;
-        float base = max(1.0 - u * u * u * u, 1e-6);
-        float height = thickness * pow(base, 0.25);
-        float slope = thickness / max(bezel, 1e-3) * u * u * u * pow(base, -0.75);
+        float base = max(1.0 - pow(u, p), 1e-6);
+        float height = thickness * pow(base, 1.0 / p);
+        float slope = thickness / max(bezel, 1e-3) * pow(u, p - 1.0) * pow(base, 1.0 / p - 1.0);
         float incident = atan(slope);
         return height * tan(incident - asin(sin(incident) / refractiveIndex));
+    }
+
+    // 영역 전체를 덮는 볼록렌즈의 이동. d 는 영역 가운데 기준 위치, halfSize 는 영역 반 크기, k 는 가로·세로 세기.
+    // 축마다 뒤 화면 자리 = 가운데 + d·(1 − k(1 − a²)), a 는 그 축의 정규화 좌표(가장자리에서 ±1).
+    // 가운데는 1/(1−k) 배로 커 보이고 가장자리로 갈수록 줄어 맨 가장자리는 제자리라 영역 안 내용이 하나도 잘리지 않는다.
+    // 축을 따로 두어 가로줄은 곧게 남는다.
+    // (높이·스넬 법칙으로 휘면 가장자리 몇 pt 안의 내용이 한두 픽셀로 눌려 줄 첫 글자가 사라졌고, 영역 사각형까지의
+    // 거리로 면을 만들면 대각선·가운데 줄에서 면이 꺾여 글자가 찢어졌고, 두 축을 섞은 거리로 키우면 줄이 술통처럼 휘었다.)
+    float2 domeShift(float2 d, float2 halfSize, float2 k) {
+        float2 a = clamp(d / halfSize, -1.0, 1.0);
+        return -d * k * (1.0 - a * a);
     }
 
     // 5x5 가우시안 근사 (CPU 판의 상자 흐림 두 번과 비슷한 폭)
@@ -250,7 +310,7 @@ final class GlassGPU {
         if (edge < p.bezel) {
             float t = max(edge, 0.0) / p.bezel;
             float u = 1.0 - t;
-            shift = refractShift(t, p.bezel, p.thickness);
+            shift = refractShift(t, p.bezel, p.thickness, p.power);
             float facing = -dot(inward, toLight);
             light = u * u * u * (facing > 0.0 ? facing * facing : 0.4 * facing * facing);
             crisp = min(1.0, u * 1.6);
@@ -296,16 +356,20 @@ final class GlassGPU {
         } else {
             edge = -sd;
             inward = -n;
-            if (edge >= e.bezel) { dst.write(float4(0.0), gid); return; }
+            if (e.dome < 0.5 && edge >= e.bezel) { dst.write(float4(0.0), gid); return; }
         }
         float coverage = clamp(edge + 0.5, 0.0, 1.0);
         if (coverage <= 0.0) { dst.write(float4(0.0), gid); return; }
         float t = clamp(max(edge, 0.0) / e.bezel, 0.0, 1.0);
         float u = 1.0 - t;
-        float shift = refractShift(t, e.bezel, e.thickness);
+        // dome 이면 thickness·power 가 가로·세로 세기
+        float2 move = e.dome > 0.5 ? domeShift(d, float2(e.width, e.height) * 0.5, float2(e.thickness, e.power))
+                                   : inward * refractShift(t, e.bezel, e.thickness, e.power);
         float facing = -dot(inward, toLight);
-        float light = u * u * u * (facing > 0.0 ? facing * facing : 0.4 * facing * facing);
-        float3 c = src.sample(linearClamp, float2(e.originX, e.originY) + px + inward * shift).rgb;
+        // 가장자리 빛은 rim 폭 안에만 (영역 전체가 휘는 판은 굴절 폭이 넓어도 빛은 가장자리에)
+        float ur = 1.0 - clamp(max(edge, 0.0) / (e.rim > 0.0 ? e.rim : e.bezel), 0.0, 1.0);
+        float light = ur * ur * ur * (facing > 0.0 ? facing * facing : 0.4 * facing * facing);
+        float3 c = src.sample(linearClamp, float2(e.originX, e.originY) + px + move).rgb;
         float l = dot(c, lumaWeights);
         c = l + (c - l) * e.saturation;
         c = c * (1.0 - e.tintAlpha) + float3(e.tintR, e.tintG, e.tintB) * e.tintAlpha;
@@ -313,6 +377,71 @@ final class GlassGPU {
         // (띠 전체에 걸쳐 진해지면 가장자리가 덜 칠해져 액자처럼 보여서 바깥 40% 안에서 다 칠한다)
         c = mix(c, float3(e.tintR, e.tintG, e.tintB), e.fill * smoothstep(0.0, 0.4, t));
         c += light * e.specular;
+        c = clamp(c, 0.0, 1.0);
+        dst.write(float4(c * coverage, coverage), gid);
+    }
+
+    float sdRound(float2 p, float2 c, float2 extent, float r) {
+        float2 q = abs(p - c) - extent;
+        return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+    }
+
+    // 두 경계가 만나는 모서리를 둥글게 이어 붙이는 max
+    float smoothMax(float a, float b, float k) {
+        float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0);
+        return mix(b, a, h) + k * h * (1.0 - h);
+    }
+
+    // 유리판 = 영역 − hole. 음수면 유리 안, 값은 가장 가까운 경계까지의 거리
+    float sdCarved(float2 p, constant Hole &g) {
+        float pane = sdRound(p, float2(g.paneW, g.paneH) * 0.5,
+                             float2(g.paneW, g.paneH) * 0.5 - g.paneRadius, g.paneRadius);
+        float hole = sdRound(p, float2(g.holeCX, g.holeCY), max(float2(g.holeHX, g.holeHY), 0.0), g.holeRadius);
+        return smoothMax(pane, -hole, g.smooth);
+    }
+
+    // 고르지 않은 영역 유리판에서 움직이는 테두리 모양을 뺀다. 굴절·빛은 edgeGlass 의 판과 같은 식이고,
+    // 바깥쪽 법선은 거리의 기울기로 구해서 영역 테두리든 움직이는 테두리든 같은 식으로 휜다.
+    kernel void holeGlass(texture2d<float> src [[texture(0)]], texture2d<float, access::write> dst [[texture(1)]],
+                          constant Hole &g [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+        if (gid.x >= uint(g.paneW) || gid.y >= uint(g.paneH)) return;
+        float2 px = float2(gid) + 0.5;
+        float edge = -sdCarved(px, g);
+        float coverage = clamp(edge + 0.5, 0.0, 1.0);
+        if (coverage <= 0.0) { dst.write(float4(0.0), gid); return; }
+        float3 tint = float3(g.tintR, g.tintG, g.tintB);
+        // 띠 안쪽은 굴절 없이 옅은 색만 (살아 있는 화면 위에 색을 덮는 자리, Draw.glassArea 의 칠과 같다)
+        if (g.dome < 0.5 && edge >= g.bezel) { dst.write(float4(tint * g.tintAlpha, g.tintAlpha) * coverage, gid); return; }
+        float2 grad = float2(sdCarved(px + float2(0.5, 0.0), g) - sdCarved(px - float2(0.5, 0.0), g),
+                             sdCarved(px + float2(0.0, 0.5), g) - sdCarved(px - float2(0.0, 0.5), g));
+        float2 inward = length(grad) > 1e-5 ? -normalize(grad) : float2(0.0);
+        float t = clamp(max(edge, 0.0) / g.bezel, 0.0, 1.0);
+        float2 move;
+        if (g.dome > 0.5) {
+            // 영역 전체 볼록렌즈 + 움직이는 테두리 가장자리는 따로 띠로 휜다(테두리 바깥쪽으로 밀려나 보이게)
+            float2 center = float2(g.paneW, g.paneH) * 0.5;
+            move = domeShift(px - center, center, float2(g.thickness, g.power));  // dome 이면 가로·세로 세기
+            float2 hc = float2(g.holeCX, g.holeCY), hext = max(float2(g.holeHX, g.holeHY), 0.0);
+            float hd = sdRound(px, hc, hext, g.holeRadius);
+            if (hd < g.holeBezel) {
+                float2 hg = float2(sdRound(px + float2(0.5, 0.0), hc, hext, g.holeRadius) - sdRound(px - float2(0.5, 0.0), hc, hext, g.holeRadius),
+                                   sdRound(px + float2(0.0, 0.5), hc, hext, g.holeRadius) - sdRound(px - float2(0.0, 0.5), hc, hext, g.holeRadius));
+                if (length(hg) > 1e-5) {
+                    move += normalize(hg) * refractShift(clamp(max(hd, 0.0) / g.holeBezel, 0.0, 1.0), g.holeBezel,
+                                                         g.holeThickness, 3.0);
+                }
+            }
+        } else {
+            move = inward * refractShift(t, g.bezel, g.thickness, g.power);
+        }
+        float facing = -dot(inward, toLight);
+        float ur = 1.0 - clamp(max(edge, 0.0) / (g.rim > 0.0 ? g.rim : g.bezel), 0.0, 1.0);
+        float light = ur * ur * ur * (facing > 0.0 ? facing * facing : 0.4 * facing * facing);
+        float3 c = src.sample(linearClamp, float2(g.paneX, g.paneY) + px + move).rgb;
+        float l = dot(c, lumaWeights);
+        c = l + (c - l) * g.saturation;
+        c = c * (1.0 - g.tintAlpha) + tint * g.tintAlpha;
+        c += light * g.specular;
         c = clamp(c, 0.0, 1.0);
         dst.write(float4(c * coverage, coverage), gid);
     }
