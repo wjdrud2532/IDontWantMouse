@@ -89,6 +89,7 @@
 
 | 테스트 | 방법 | 결과 |
 |---|---|---|
+| 웹 스크롤 영역 회귀 테스트 (2026-11-05) | `Tools/scroll-fixtures.sh` 를 만들어 돌림. 처음 돌렸을 때 이름 규칙이 가로 탭 줄(`scrollable-tabs overflow-x-auto`)·캐러셀(`carousel scroll-snap-x`)·표 감싸개(`table-scroll`)·`no-scroll`·`is-scrolled` 머리글·`scrollspy` 를 모두 세로 스크롤 영역으로 잡았음. 상태·동작 이름은 힌트에서 빼고, 가로를 뜻하는 이름이 있고 세로를 콕 집은 이름이 없으면 영역이 아니게, 표 감싸개도 코드 블록처럼 줄이 넘칠 때만 영역으로 바꾼 뒤 4페이지 모두 통과(진짜 세로 스크롤 상자 6개는 그대로, `overflow-y-auto overflow-x-hidden` 포함). Chrome·VS Code·Safari·Slack·Mail·WezTerm·Finder 에서 찾는 영역은 바꾸기 전과 같음. Safari 엔진은 역할 없는 div 를 접근성 트리에 넣지 않아 시험 대상에 `role="region"` 을 닮. 이름도 세로 막대도 없는 상자는 찾지 못함(지금 동작) |
 | 코드 블록이 스크롤 영역으로 잡힘 (2026-11-05) | 확인됨: max.modular.com 문서(Chrome)에서 코드 블록 `<pre class="prism-code … thin-scrollbar">` 가 이름의 scroll 때문에 영역으로 잡혀 유리판이 덮였음(세로로는 스크롤되지 않는 블록). 자신이나 바로 아래 자식이 코드(AXCodeStyleGroup)면 줄이 블록 밖으로 세로로 넘칠 때만 영역으로 침. 고친 뒤 그 탭에서 페이지·왼쪽 목차(`menu thin-scrollbar`)만 남음. 포커스를 가져가지 않는 WKWebView 시험 창에서 내용 크기 코드 블록은 빠지고 max-height 로 세로로 넘치는 코드 블록은 남음(고치기 전에는 둘 다 잡힘). VS Code·Safari·Slack·Mail·WezTerm·Finder 결과는 그대로 |
 | 여러 줄로 접힌 링크 (2026-11-05) | Claude 앱 파일 패널의 긴 URL 링크, 숨긴 Safari 의 시험 페이지(`elementFromPoint` 로 실제로 눌리는지 계산) | 확인됨: 두 줄로 접힌 링크는 틀 가운데가 첫 줄 오른쪽과 둘째 줄 왼쪽 사이 빈 곳이라 눌러도 링크가 아님(시험 페이지 a1: 가운데 X, 첫 글자 O). 키 26px 이상 링크만 안쪽 글자 요소에 첫 글자 자리(`AXBoundsForRange`)를 물어, 틀이 글자보다 1.5배 넘게 높고 글자가 위쪽이면 라벨·클릭을 첫 글자로 옮김. Claude 앱 URL 3개가 옮겨짐(예: 틀 1194,609 492x39 → 1339,617). 더 드는 시간 Chrome(GitHub) 1.9ms, Claude 0.4ms, Slack 0.3ms. AX 의 hit-test 는 Chromium 에서 틀로 판정해 가운데도 링크라고 답하므로 확인에 쓸 수 없음 |
 | WezTerm 분할 창 라벨 | `--dump` | 간접 확인: 4개 창에 라벨이 붙고 제목으로 검색 가능 |
@@ -213,6 +214,7 @@
 Tools/check-apps.sh                       # 실행 중인 앱 전부 점검, 경고 있으면 종료 코드 1
 Tools/check-apps.sh com.tinyspeck.slackmacgap com.github.wez.wezterm
 Tools/e2e-wezterm.sh                      # 시험용 WezTerm 창에서 Enter·Esc 시나리오 (build.sh 후 앱을 다시 띄워 두고)
+Tools/scroll-fixtures.sh                  # 웹 스크롤 영역 회귀 테스트 (시험 페이지마다 기대한 영역만 찾는지)
 ```
 
 **값만 출력 (화면에 아무것도 안 뜸)**

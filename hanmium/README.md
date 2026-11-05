@@ -252,6 +252,7 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `.build/release/Hanmium --check [번들ID]` | 호환성 점검. 번들 ID 를 빼면 실행 중인 앱 전부, 경고가 있으면 종료 코드 1 |
 | `Tools/check-apps.sh` | 위 점검을 빌드와 함께 (코드를 고친 뒤 회귀 확인) |
 | `Tools/e2e-wezterm.sh` | 시험용 WezTerm 창을 띄워 스크롤 모드를 실제 키로 돌려 보는 회귀 테스트 |
+| `Tools/scroll-fixtures.sh` | 웹 스크롤 영역 회귀 테스트. 잘못 잡았던(놓쳤던) 웹 요소를 모은 시험 페이지(`Tools/ScrollFixtures/pages`)를 키 포커스를 가져가지 않는 창에 띄우고, 찾은 영역이 페이지에 적은 기대와 같은지 본다. 새 오인식을 찾으면 페이지를 하나 더 만들고 통과할 때까지 고친다 |
 | `defaults write com.local.Hanmium profile -bool true` | 라벨 찾기 단계별 시간을 로그에 남긴다 (끄기: `defaults delete com.local.Hanmium profile`) |
 
 명령줄 옵션은 `--dump`, `--check`, `--settings`(설정 창과 함께 실행), `--click`·`--search`·`--scroll`(실행 1초 뒤 그 모드) 이다. 모르는 옵션이면 앱으로 뜨지 않고 사용법만 출력한다. 뜨면 실행 중인 Hanmium 을 대신해 버리기 때문이다.

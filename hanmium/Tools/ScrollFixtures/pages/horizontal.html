@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="expect-areas" content="">
+<title>가로로만 스크롤되는 것</title>
+<!-- 시험 대상 div 에는 role="region" 을 단다: Safari 엔진(WebKit)은 역할 없는 div 를 접근성 트리에 넣지 않는다 -->
+<style>
+body{font:13px sans-serif;margin:8px;display:grid;grid-template-columns:420px 420px;gap:10px;align-items:start}
+pre{overflow:auto;background:#eee;padding:6px;margin:0}
+.row{white-space:nowrap} .item{display:inline-block;width:160px;height:90px;background:#ccd;margin:4px}
+</style></head><body>
+
+<!-- 가로 탭 줄·캐러셀·표 감싸개는 세로 스크롤 영역이 아니다 -->
+<div id="tabs" role="region" aria-label="tabs" class="scrollable-tabs overflow-x-auto" style="overflow-x:auto;height:110px"><div class="row"><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span></div></div>
+<div id="carousel" role="region" aria-label="carousel" class="carousel scroll-snap-x" style="overflow-x:auto;height:120px"><div class="row"><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span><span class="item"></span></div></div>
+<div id="table-wrap" role="region" aria-label="table-wrap" class="table-scroll" style="overflow-x:auto"><table border="1"><tr><td>셀 0</td><td>값 0 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr><tr><td>셀 1</td><td>값 1 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr><tr><td>셀 2</td><td>값 2 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr><tr><td>셀 3</td><td>값 3 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr><tr><td>셀 4</td><td>값 4 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr><tr><td>셀 5</td><td>값 5 가 아주 길어서 가로로 넘칠 수 있는 칸 이것은 매우 긴 내용입니다 정말로 깁니다</td></tr></table></div>
+
+</body></html>

@@ -493,22 +493,45 @@ final class TreeBuilder {
             default: break
             }
         }
-        if ["overflow-auto", "overflow-y-auto"].contains(name) { return true }
+        if ["overflow-auto", "overflow-y-auto", "overflow-scroll", "overflow-y-scroll"].contains(name) { return true }
         guard name.range(of: "scroll", options: .caseInsensitive) != nil else { return false }
-        return name.range(of: #"^-?scroll-[mp][trblxyse]?-"#, options: .regularExpression) == nil
+        if name.range(of: #"^-?scroll-[mp][trblxyse]?-"#, options: .regularExpression) != nil { return false }
+        // 스크롤 상자가 아니라 상태·동작을 뜻하는 이름: 스크롤된 머리글(is-scrolled), 스크롤 잠금(no-scroll), 스크롤 따라가기
+        // (scrollspy), 부드러운 스크롤, 맨 위·아래로 단추, 스크롤 표시. 시험 페이지 Tools/ScrollFixtures/pages/names.html
+        return name.range(of: #"no-?scroll|scroll-?lock|lock-?scroll|scrolled|scroll-?spy|smooth-?scroll|scroll-?smooth|"#
+                          + #"scroll-?behavio|scroll-?to-?(top|bottom)|scroll-?top|scroll-?(margin|padding)|scroll-?snap-?(align|stop)|"#
+                          + #"scroll-?(indicator|hint|progress|down|button|arrow)"#,
+                          options: [.regularExpression, .caseInsensitive]) == nil
     }
 
-    /// 안쪽 항목(표·트리는 줄)이 영역 밖(위·아래)까지 이어지는지: 그래야 스크롤되는 영역이다. 앞뒤 몇 개만 본다.
-    /// 코드 블록이면 코드 줄들: 자신이나 바로 아래 자식이 코드(<code>, AXCodeStyleGroup)일 때 그 자식들
-    private static func codeLines(_ ref: AXUIElement, children: [AXUIElement]) -> [AXUIElement]? {
+    /// DOM 클래스·id 들이 세로 스크롤 상자를 가리키는지. 스크롤 이름(marksScroller)이 있어도 가로로만 스크롤되는 것을 뜻하는
+    /// 이름(가로 탭 줄·캐러셀·표 감싸개·overflow-x-auto)이 있고 세로를 콕 집은 이름이 없으면 아니다.
+    /// 시험 페이지 Tools/ScrollFixtures/pages/horizontal.html
+    static func marksVerticalScroller(_ names: [String]) -> Bool {
+        guard names.contains(where: marksScroller) else { return false }
+        func has(_ pattern: String) -> Bool {
+            names.contains { $0.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
+        }
+        let horizontal = has(#"overflow-x-(auto|scroll)|scroll-?x\b|x-?scroll|h-?scroll\b|horizontal|snap-x|carousel|"#
+                             + #"scroll.*\b(tabs|tab-?bar|tab-?list|table)\b|\b(tabs|tab-?bar|tab-?list|table)\b.*scroll"#)
+        let vertical = has(#"overflow-y-(auto|scroll)|^overflow-(auto|scroll)$|scroll-?y\b|y-?scroll|vertical"#)
+        return !horizontal || vertical
+    }
+
+    /// 내용 크기대로 늘어나는 블록이면 그 안의 줄들: 코드 블록(자신이나 바로 아래 자식이 <code>, AXCodeStyleGroup)은
+    /// 코드 줄, 표를 감싼 블록은 표의 줄. 이런 블록은 긴 줄 때문에 가로로 넘쳐 scroll 이름을 달아도 세로로는 스크롤되지 않는다.
+    private static func contentLines(_ ref: AXUIElement, children: [AXUIElement]) -> [AXUIElement]? {
         if AX.string(AX.copy(ref, kAXSubroleAttribute)) == "AXCodeStyleGroup" { return children }
         guard children.count <= 3 else { return nil }
-        for child in children where AX.string(AX.copy(child, kAXSubroleAttribute)) == "AXCodeStyleGroup" {
-            return AX.elements(AX.copy(child, kAXChildrenAttribute))
+        for child in children {
+            let v = AX.multi(child, [kAXRoleAttribute, kAXSubroleAttribute])
+            if AX.string(v[1]) == "AXCodeStyleGroup" { return AX.elements(AX.copy(child, kAXChildrenAttribute)) }
+            if AX.string(v[0]) == "AXTable" { return AX.elements(AX.copy(child, kAXRowsAttribute)) }
         }
         return nil
     }
 
+    /// 안쪽 항목(표·트리는 줄)이 영역 밖(위·아래)까지 이어지는지: 그래야 스크롤되는 영역이다. 앞뒤 몇 개만 본다.
     private static func overflows(_ children: [AXUIElement], frame: CGRect) -> Bool {
         let sample = children.count <= 8 ? children : Array(children.prefix(4) + children.suffix(4))
         for child in sample {
@@ -565,7 +588,7 @@ final class TreeBuilder {
             if depth == 0 { page = whole }
             if depth > 0 {
                 let names = ((v[3] as? [String]) ?? []) + [AX.string(v[4]) ?? ""]
-                var scrolly = names.contains(where: Self.marksScroller)
+                var scrolly = Self.marksVerticalScroller(names)
                 // 이름도 스크롤 막대도 없는 목록·표는 내용이 실제로 넘칠 때만 (다 보이는 표는 스크롤되지 않는다):
                 // 줄이 목록 밖으로 나가거나(목록 자체가 스크롤) 목록이 조상 틀 밖으로 나갈 때(감싼 상자가 스크롤).
                 // 이름에 scroll 이 든 것은 그대로 둔다: 보이는 줄만 그리는 가상 목록(Slack)은 줄이 넘치지 않는다.
@@ -578,9 +601,10 @@ final class TreeBuilder {
                     let bottom = whole.maxY >= page.maxY - 2 ? 1e9 : whole.maxY
                     return Self.overflows(items, frame: CGRect(x: whole.minX, y: top, width: whole.width, height: bottom - top))
                 }
-                // 코드 블록(<pre><code>)은 긴 줄이 가로로 넘쳐서 thin-scrollbar 같은 이름을 달지만 세로로는 스크롤되지 않는다.
+                // 코드 블록·표 감싸개는 긴 줄이 가로로 넘쳐서 thin-scrollbar 같은 이름을 달지만 세로로는 스크롤되지 않는다.
                 // 줄이 블록 밖으로 세로로 넘칠 때만 영역으로 친다(max.modular.com 문서의 코드 블록이 영역으로 잡혀 유리판이 덮였다).
-                if scrolly, v[5] == nil, let lines = Self.codeLines(ref, children: AX.elements(v[6])) {
+                // 시험 페이지 Tools/ScrollFixtures/pages/code-blocks.html
+                if scrolly, v[5] == nil, let lines = Self.contentLines(ref, children: AX.elements(v[6])) {
                     let top = whole.minY <= page.minY + 2 ? -1e9 : whole.minY
                     let bottom = whole.maxY >= page.maxY - 2 ? 1e9 : whole.maxY
                     scrolly = Self.overflows(lines, frame: CGRect(x: whole.minX, y: top, width: whole.width, height: bottom - top))

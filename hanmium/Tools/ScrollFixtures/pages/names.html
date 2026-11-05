@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="expect-areas" content="">
+<title>스크롤 상자가 아닌데 이름에 scroll 이 든 것</title>
+<!-- 시험 대상 div 에는 role="region" 을 단다: Safari 엔진(WebKit)은 역할 없는 div 를 접근성 트리에 넣지 않는다 -->
+<style>
+body{font:13px sans-serif;margin:8px;display:grid;grid-template-columns:420px 420px;gap:10px;align-items:start}
+pre{overflow:auto;background:#eee;padding:6px;margin:0}
+.row{white-space:nowrap} .item{display:inline-block;width:160px;height:90px;background:#ccd;margin:4px}
+</style></head><body>
+
+<!-- 상태·동작·여백을 뜻하는 이름 -->
+<header id="scrolled-header" class="site-header is-scrolled" style="height:110px;background:#eef">머리글</header>
+<div id="noscroll" role="region" aria-label="noscroll" class="no-scroll" style="background:#efe"><p>항목 0 lorem ipsum dolor sit amet</p><p>항목 1 lorem ipsum dolor sit amet</p><p>항목 2 lorem ipsum dolor sit amet</p><p>항목 3 lorem ipsum dolor sit amet</p><p>항목 4 lorem ipsum dolor sit amet</p></div>
+<div id="tw-margin" role="region" aria-label="tw-margin" class="scroll-mt-4 scroll-pt-2" style="background:#fee"><p>항목 0 lorem ipsum dolor sit amet</p><p>항목 1 lorem ipsum dolor sit amet</p><p>항목 2 lorem ipsum dolor sit amet</p><p>항목 3 lorem ipsum dolor sit amet</p><p>항목 4 lorem ipsum dolor sit amet</p></div>
+<div id="tw-cond" role="region" aria-label="tw-cond" class="hover:overflow-y-auto [&amp;_pre]:overflow-auto" style="background:#eee"><p>항목 0 lorem ipsum dolor sit amet</p><p>항목 1 lorem ipsum dolor sit amet</p><p>항목 2 lorem ipsum dolor sit amet</p><p>항목 3 lorem ipsum dolor sit amet</p><p>항목 4 lorem ipsum dolor sit amet</p></div>
+<div id="spy" role="region" aria-label="spy" class="scrollspy smooth-scroll" style="background:#ffe"><p>항목 0 lorem ipsum dolor sit amet</p><p>항목 1 lorem ipsum dolor sit amet</p><p>항목 2 lorem ipsum dolor sit amet</p><p>항목 3 lorem ipsum dolor sit amet</p><p>항목 4 lorem ipsum dolor sit amet</p></div>
+
+<!-- Claude 앱 입력창(2026-11-05): 조건부 클래스 안의 scroll 은 이 요소가 스크롤 상자라는 뜻이 아니다 -->
+<div id="claude-input" role="region" aria-label="claude-input" class="relative group-has-[[data-chat-input-scrolls-with-chat]]:relative" style="background:#eef"><p>항목 0 lorem ipsum dolor sit amet</p><p>항목 1 lorem ipsum dolor sit amet</p><p>항목 2 lorem ipsum dolor sit amet</p><p>항목 3 lorem ipsum dolor sit amet</p><p>항목 4 lorem ipsum dolor sit amet</p></div>
+</body></html>

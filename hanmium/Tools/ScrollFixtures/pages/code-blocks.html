@@ -1,0 +1,53 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="expect-areas" content="capped">
+<title>코드 블록 (2026-11-05 max.modular.com)</title>
+<!-- 시험 대상 div 에는 role="region" 을 단다: Safari 엔진(WebKit)은 역할 없는 div 를 접근성 트리에 넣지 않는다 -->
+<style>
+body{font:13px sans-serif;margin:8px;display:grid;grid-template-columns:420px 420px;gap:10px;align-items:start}
+pre{overflow:auto;background:#eee;padding:6px;margin:0}
+.row{white-space:nowrap} .item{display:inline-block;width:160px;height:90px;background:#ccd;margin:4px}
+</style></head><body>
+
+<!-- 내용 크기대로 늘어나는 코드 블록: 긴 줄은 가로로만 넘친다. 이름에 scroll 이 들어 있어도 영역이 아니다 -->
+<pre id="flow" class="prism-code language-python thin-scrollbar"><code>result_0 = some_function_with_a_long_name(argument_0, another_argument_0, keyword=value_0)
+result_1 = some_function_with_a_long_name(argument_1, another_argument_1, keyword=value_1)
+result_2 = some_function_with_a_long_name(argument_2, another_argument_2, keyword=value_2)
+result_3 = some_function_with_a_long_name(argument_3, another_argument_3, keyword=value_3)
+result_4 = some_function_with_a_long_name(argument_4, another_argument_4, keyword=value_4)
+result_5 = some_function_with_a_long_name(argument_5, another_argument_5, keyword=value_5)
+result_6 = some_function_with_a_long_name(argument_6, another_argument_6, keyword=value_6)
+result_7 = some_function_with_a_long_name(argument_7, another_argument_7, keyword=value_7)</code></pre>
+<!-- 높이 제한으로 세로로 넘치는 코드 블록은 영역이다 -->
+<pre id="capped" class="prism-code thin-scrollbar" style="max-height:150px"><code>x_0 = 0
+x_1 = 1
+x_2 = 2
+x_3 = 3
+x_4 = 4
+x_5 = 5
+x_6 = 6
+x_7 = 7
+x_8 = 8
+x_9 = 9
+x_10 = 10
+x_11 = 11
+x_12 = 12
+x_13 = 13
+x_14 = 14
+x_15 = 15
+x_16 = 16
+x_17 = 17
+x_18 = 18
+x_19 = 19
+x_20 = 20
+x_21 = 21
+x_22 = 22
+x_23 = 23
+x_24 = 24</code></pre>
+<pre id="small" class="codeBlock thin-scrollbar"><code>print("hello")
+print("world")
+print("!")
+print("?")
+print("end")
+print("more")</code></pre>
+
+</body></html>
