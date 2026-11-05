@@ -1,11 +1,13 @@
 #!/bin/sh
 # release 빌드 후 build/Hanmium.app 으로 묶는다 (Dock 아이콘 없는 상주 앱).
+#   ./build.sh                          build/Hanmium.app
+#   ./build.sh build/test/Hanmium.app   다른 곳에 (써 보기용. 같은 번들 ID·서명이라 권한은 그대로)
 set -e
 cd "$(dirname "$0")"
 
 swift build -c release
 
-APP=build/Hanmium.app
+APP="${1:-build/Hanmium.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Hanmium "$APP/Contents/MacOS/Hanmium"

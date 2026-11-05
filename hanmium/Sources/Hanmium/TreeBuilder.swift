@@ -90,7 +90,7 @@ final class TreeBuilder {
         let side = SideTargets()
         let group = DispatchGroup()
         let lane = DispatchQueue.global(qos: .userInteractive)
-        lane.async(group: group) { side.menus = self.openMenus() }
+        lane.async(group: group) { side.menus = Self.openMenus(of: self.app) }
         lane.async(group: group) {
             if let bar = AX.element(AX.copy(self.app, kAXMenuBarAttribute)) {
                 side.menuBar = Self.fetchAll(AX.elements(AX.copy(bar, kAXChildrenAttribute)), clip: self.screenBounds)
@@ -129,6 +129,8 @@ final class TreeBuilder {
             return Snapshot(elements: targets, anchor: nil)
         }
         for e in side.menuBar + side.extras + side.dock where isTarget(e, insideTarget: true) { add(e) }
+        Self.locateTextStarts(targets)
+        profile.mark("여러 줄 링크")
         snap.elements = targets
         return snap
     }
@@ -157,6 +159,19 @@ final class TreeBuilder {
             }
         }
         return out.compactMap { $0 }
+    }
+
+    /// 키 큰 링크마다 여러 줄로 접혔는지 보고 첫 글자 자리를 찾는다(Element.locateTextStart). 몇 갈래로 나눠 동시에.
+    static func locateTextStarts(_ elements: [Element]) {
+        let links = elements.filter { $0.role == "AXLink" && $0.frame.height >= 26 }
+        guard !links.isEmpty else { return }
+        DispatchQueue.concurrentPerform(iterations: min(4, links.count)) { lane in
+            var i = lane
+            while i < links.count {
+                links[i].locateTextStart()
+                i += 4
+            }
+        }
     }
 
     private func walk(_ ref: AXUIElement, clip: CGRect, depth: Int, owner: Element?) {
@@ -257,7 +272,8 @@ final class TreeBuilder {
         return found.isEmpty ? nil : found
     }
 
-    private func openMenus() -> [AXUIElement] {
+    /// 앱에 지금 열려 있는 메뉴들
+    static func openMenus(of app: AXUIElement) -> [AXUIElement] {
         var menus: [AXUIElement] = []
         // 컨텍스트 메뉴는 앱 바로 아래 AXMenu 로 붙는다
         for child in AX.elements(AX.copy(app, kAXChildrenAttribute))

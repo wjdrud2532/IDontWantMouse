@@ -64,6 +64,17 @@ enum AX {
         return _AXUIElementGetWindow(window, &id) == .success && id != 0 ? id : nil
     }
 
+    /// 글자 요소에서 range 글자들이 그려진 사각형 (AX 좌표계). 글자 요소가 아니면 nil.
+    static func boundsForRange(_ el: AXUIElement, location: Int, length: Int) -> CGRect? {
+        var range = CFRange(location: location, length: length)
+        guard let value = AXValueCreate(.cfRange, &range) else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, value, &out)
+                == .success, let out, CFGetTypeID(out) == AXValueGetTypeID() else { return nil }
+        var rect = CGRect.zero
+        return AXValueGetValue(out as! AXValue, .cgRect, &rect) ? rect : nil
+    }
+
     static func pid(_ el: AXUIElement) -> pid_t? {
         var pid: pid_t = 0
         return AXUIElementGetPid(el, &pid) == .success ? pid : nil
@@ -91,6 +102,8 @@ final class Element {
     var extraText: [String] = []
     /// WezTerm 패널이면 그 번호. 누르면 마우스 대신 wezterm cli 로 옮긴다.
     var wezTermPane: Int?
+    /// 여러 줄로 접힌 링크의 첫 글자 자리 (locateTextStart)
+    var textStart: CGPoint?
 
     static let batchAttributes = [
         kAXRoleAttribute, kAXSubroleAttribute, kAXPositionAttribute, kAXSizeAttribute,
@@ -138,10 +151,30 @@ final class Element {
 
     var isVisible: Bool { !visibleFrame.isNull && visibleFrame.width >= 3 && visibleFrame.height >= 3 }
 
-    /// 클릭할 위치. 앱이 알려준 activation point 가 보이는 영역 안이면 그걸 쓰고, 아니면 가운데.
+    /// 클릭할 위치. 여러 줄로 접힌 링크는 첫 글자, 앱이 알려준 activation point 가 보이는 영역 안이면 그것, 아니면 가운데.
     var clickPoint: CGPoint {
+        if let p = textStart, visibleFrame.contains(p) { return p }
         if let p = activationPoint, visibleFrame.insetBy(dx: -1, dy: -1).contains(p) { return p }
         return CGPoint(x: visibleFrame.midX, y: visibleFrame.midY)
+    }
+
+    /// 두 줄 넘게 접힌 링크의 틀은 첫 줄 오른쪽과 마지막 줄 왼쪽을 함께 감싸서, 가운데가 줄 사이 빈 곳이거나
+    /// 글자가 없는 쪽이라 눌러도 링크가 아니다(Claude 앱의 긴 URL). 안쪽 글자 요소에 첫 글자 자리를 물어서
+    /// 틀이 그 글자보다 1.5배 넘게 높고 글자가 위쪽에 있으면(여백만 있는 한 줄 링크는 글자가 가운데) 첫 글자를 누른다.
+    /// 글자 요소는 바로 아래이거나 span 으로 한두 겹 싸여 있다. 보통 AX 두 번.
+    func locateTextStart() {
+        guard role == "AXLink", frame.height >= 26 else { return }
+        var node = ref
+        for _ in 0..<3 {
+            guard let first = AX.elements(AX.copy(node, kAXChildrenAttribute)).first else { return }
+            if let c = AX.boundsForRange(first, location: 0, length: 1), c.height > 0 {
+                if frame.height > c.height * 1.5, c.midY < frame.midY - c.height * 0.3 {
+                    textStart = CGPoint(x: c.midX, y: c.midY)
+                }
+                return
+            }
+            node = first
+        }
     }
 
     var searchTexts: [String] { [title, desc, placeholder, help].compactMap { $0 } + extraText }

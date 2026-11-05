@@ -8,10 +8,18 @@ import QuartzCore
 /// 1~9: 창이 여러 개면 그 번호의 창으로(같은 번호를 다시 누르면 그 창의 다음 영역),
 ///      창이 하나면 그 번호의 스크롤 영역으로.
 /// Tab·Shift-Tab, Ctrl-N/P: 다음/이전 스크롤 영역(창을 넘나든다). Enter: 그 영역을 눌러 포커스를 옮기고 끝내기.
-/// Esc: 끝내기.
+/// f: 라벨 띄우기(onLabels). 그 밖의 ⌘·⌃ 단축키(탭 바꾸기 등)는 앱으로 넘긴다(onPassThrough). Esc: 끝내기.
 /// 휠 이벤트는 커서를 옮기지 않고 그 창에 직접 보낸다. 그럴 수 없는 곳에서만 커서를 영역으로 옮긴다.
+/// 페이지를 옮겨 가서 고른 영역의 AX 요소가 사라지면 onStale 로 알린다(그 자리에 새로 열어야 한다).
 final class ScrollMode: Mode {
     var onExit: (() -> Void)?
+    /// f 를 눌렀을 때 (라벨 모드로 넘어가기)
+    var onLabels: (() -> Void)?
+    /// 스크롤 모드가 쓰지 않는 ⌘·⌃ 단축키를 눌렀을 때 (앱으로 넘겨야 한다)
+    var onPassThrough: ((NSEvent) -> Void)?
+    /// 고른 영역이 사라졌을 때. 웹 페이지는 문서가 바뀌면(같은 사이트 안에서 옮겨 가도) 스크롤 영역 요소를 새로 만든다.
+    var onStale: (() -> Void)?
+    private var staleTimer: Timer?
     private let pid: pid_t
     private let bundleID: String?
     private let windows: [Element]
@@ -87,6 +95,28 @@ final class ScrollMode: Mode {
         // 스크롤 모드 동안 뒤 화면을 계속 받아 물방울 이동·스크롤 중에도 굴절이 바로 바뀌게 한다
         if glassLabels { GlassSnapshots.startStream(excluding: overlay.windowIDs) }
         focus(index)
+        watchStale()
+    }
+
+    /// 고른 영역 요소가 아직 있는지 0.5초마다 본다. 사라진 요소로는 표지를 읽지 못해서, 휠이 안 먹은 줄 알고
+    /// 다른 지점에 같은 양을 다시 보내 크게 튄다(checkAim). 앱이 느려도 키 입력이 막히지 않게 AX 는 뒤에서 묻는다.
+    private func watchStale() {
+        staleTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self, !stopped else { return }
+            let ref = current.ref
+            DispatchQueue.global(qos: .utility).async {
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(ref, kAXRoleAttribute as CFString, &value) == .invalidUIElement
+                else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !stopped, CFEqual(current.ref, ref), staleTimer != nil else { return }
+                    staleTimer?.invalidate()
+                    staleTimer = nil
+                    Log.write("스크롤 영역이 사라짐(페이지 바뀜) → 새로 열기 [\(bundleID ?? "?")]")
+                    onStale?()
+                }
+            }
+        }
     }
 
     func stop() {
@@ -97,6 +127,7 @@ final class ScrollMode: Mode {
             Log.write("스크롤 모드 닫힘: 창 \(windowID) 영역 \(index) 기억")
         }
         driver.stop()
+        staleTimer?.invalidate()
         motionTimer?.invalidate()
         glassRefresh?.cancel()
         GlassSnapshots.stopStream()
@@ -386,6 +417,13 @@ final class ScrollMode: Mode {
             clickArea()
             return
         }
+        // 키 포커스가 Hanmium 에 있어서 ⌘·⌃ 단축키(⌃Tab, ⌘1, ⌘← 등)가 앱에 가지 않으므로 넘긴다. ⌃N/⌃P 는 영역 이동.
+        let character = KeyTranslator.character(for: event.keyCode)
+        if let onPassThrough, event.modifierFlags.contains(.command)
+            || event.modifierFlags.contains(.control) && character != "n" && character != "p" {
+            onPassThrough(event)
+            return
+        }
         if let dir = direction(for: event) {
             driver.hold(event.keyCode, dir)
             return
@@ -402,6 +440,7 @@ final class ScrollMode: Mode {
         switch c {
         case "n" where control: focus(index + 1)
         case "p" where control: focus(index - 1)
+        case "f": onLabels?()
         case "1"..."9":
             if let n = Int(String(c)) { select(number: n) }
         case "d", "u":
@@ -479,6 +518,8 @@ final class ScrollMode: Mode {
         checking = nil
         guard !stopped, area == index, let probe, let target else { return }
         let after = probe.read()
+        // 표지를 하나도 못 읽으면(요소가 사라짐) 움직였는지 알 수 없다. 다른 지점에 다시 보내면 크게 튀므로 그만 본다.
+        if (c.before + after).allSatisfy({ $0 == nil }) { return }
         if !ScrollProbe.moved(c.before, after) {
             let points = aimPoints
             guard aimIndex + 1 < points.count else {

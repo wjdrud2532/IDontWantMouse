@@ -10,6 +10,8 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     enum Kind { case labels, search }
 
     var onExit: (() -> Void)?
+    /// 눌러서 닫혔으면 누른 대상 (Esc 로 닫았으면 nil)
+    private(set) var clicked: Element?
     private let targets: [Element]
     private let labels: [String]
     private let alphabet: Set<Character>
@@ -107,6 +109,7 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     }
 
     private func click(_ target: Element, modifiers: NSEvent.ModifierFlags) {
+        clicked = target
         if let pane = target.wezTermPane {
             stop()
             WezTerm.activate(pane: pane)

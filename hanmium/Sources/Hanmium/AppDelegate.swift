@@ -14,6 +14,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var current: Mode?
     private var currentKind: ModeKind?
     private var building = false
+    /// 스크롤 모드를 연 뒤로 이어지는 흐름. f 로 라벨을 띄웠다가 Esc 로 돌아오고, 라벨을 눌러 옮겨 가거나 앱·창·탭·데스크톱을
+    /// 바꿔도 옮겨 간 곳에 스크롤 모드를 다시 연다. 스크롤 모드의 Esc·Enter, 마우스 클릭, 스크롤 단축키, 입력칸으로 가면 끝난다.
+    private var scrollSession = false
+    /// 다른 모드로 바꾸거나 다시 열려고 닫는 중. 이렇게 닫힌 것으로는 흐름을 끝내거나 이어 가지 않는다.
+    private var replacing = false
+    private var reopenWork: DispatchWorkItem?
+    /// 띄우려고 찾는 중에 그만두면 늘려서, 늦게 도착한 결과를 버린다
+    private var openToken = 0
+    /// 라벨을 누르거나 단축키를 넘기기 직전 앞 앱의 키 포커스. 그 뒤 '새' 입력칸으로 갔는지 볼 때 쓴다(typing).
+    private var focusBefore: AXUIElement?
+    /// 누른 것이 연 메뉴가 닫히기를 기다리는 동안 마우스 누름을 지켜보는 것 (waitForPopup)
+    private var popupWait: Any?
+    /// 흐름 중 다시 열었는데 스크롤 영역이 없어서(페이지를 그리는 중) 다시 찾아본 횟수
+    private var emptyRetries = 0
     private var statusItem: StatusItem?
     private lazy var settings = SettingsWindowController(
         onHotkeysChanged: { [weak self] in self?.reloadHotkeys() },
@@ -146,10 +160,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 같은 모드 단축키를 다시 누르면 닫고, 다른 모드면 바꿔 띄운다.
     func toggle(_ kind: ModeKind) {
         if let mode = current {
-            let same = currentKind == kind
-            mode.stop()
-            if same { return }
+            if currentKind == kind {
+                if kind == .scroll { scrollSession = false }
+                mode.stop()
+                return
+            }
+            replace(mode)
+        } else if kind == .scroll && scrollSession {
+            if popupWait == nil {
+                // 흐름 중 다시 여는 사이에 누르면 끝낸다
+                scrollSession = false
+                openToken += 1
+                return
+            }
+            // 메뉴가 닫히기를 기다리는 중(아무것도 떠 있지 않다): 지금 바로 연다
+            reopenWork?.cancel()
+            endPopupWait()
         }
+        open(kind)
+    }
+
+    /// 이어 갈 모드를 띄우려고 지금 모드를 닫는다
+    private func replace(_ mode: Mode?) {
+        replacing = true
+        mode?.stop()
+        replacing = false
+    }
+
+    private func open(_ kind: ModeKind) {
         guard !building else { return }
         guard AXIsProcessTrusted() else {
             NSSound.beep()
@@ -160,6 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 라벨을 찾는 동안 유리 라벨이 굴절시킬 화면을 찍어둔다 (오버레이가 뜨기 전)
         if kind != .search { GlassSnapshots.retake() }
         building = true
+        openToken += 1
+        let token = openToken
         let builder = TreeBuilder.forFrontmost(front)
         axQueue.async {
             switch kind {
@@ -167,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let snapshot = builder.scrollSnapshot()
                 DispatchQueue.main.async {
                     self.building = false
+                    guard token == self.openToken else { return }
                     self.presentScroll(snapshot)
                 }
             case .labels, .search:
@@ -174,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async {
                     Timing.mark("대상 찾기(\(snapshot.elements.count)개)")
                     self.building = false
+                    guard token == self.openToken else { return }
                     self.presentClick(kind, snapshot)
                     ExtrasCache.refreshIfStale()
                 }
@@ -184,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func presentClick(_ kind: ModeKind, _ snapshot: Snapshot) {
         guard !snapshot.elements.isEmpty else {
             NSSound.beep()
+            if scrollSession { reopenScroll(after: 0) }
             return
         }
         let screen = Screens.screen(for: snapshot.anchor)
@@ -192,20 +235,162 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentScroll(_ snapshot: ScrollSnapshot) {
         guard !snapshot.areas.isEmpty else {
+            // 흐름 중이면 옮겨 간 페이지를 아직 그리는 중일 수 있어서 조금 더 기다려 본다
+            if scrollSession, emptyRetries < 3 {
+                emptyRetries += 1
+                reopenScroll(after: 0.3)
+                return
+            }
+            emptyRetries = 0
             NSSound.beep()
+            scrollSession = false
             return
         }
+        emptyRetries = 0
         let anchor = snapshot.windows.indices.contains(snapshot.focusedWindow)
             ? snapshot.windows[snapshot.focusedWindow].frame : nil
-        install(ScrollMode(snapshot: snapshot, screen: Screens.screen(for: anchor)), .scroll)
+        let mode = ScrollMode(snapshot: snapshot, screen: Screens.screen(for: anchor))
+        mode.onLabels = { [weak self, weak mode] in
+            guard let self else { return }
+            replace(mode)
+            open(.labels)
+        }
+        mode.onPassThrough = { [weak self] event in self?.passThrough(event) }
+        mode.onStale = { [weak self] in self?.reopenScroll(after: 0.2) }
+        scrollSession = true
+        install(mode, .scroll)
+    }
+
+    /// 스크롤 모드에서 누른 ⌘·⌃ 단축키(탭 바꾸기 등): 스크롤 모드를 닫아 키 포커스를 앱에 돌려준 뒤 같은 키를 보내고,
+    /// 조금 뒤 그 자리에 스크롤 모드를 다시 연다. ⌘T·⌘L 처럼 입력칸으로 갔으면 글을 쓰려는 것이라 끝낸다.
+    private func passThrough(_ event: NSEvent) {
+        focusBefore = Self.focusedElement()
+        replace(current)
+        let key = event.keyCode
+        let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.intersection([.command, .control, .option, .shift]).rawValue))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            for down in [true, false] {
+                let e = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down)
+                e?.flags = flags
+                e?.post(tap: .cghidEventTap)
+            }
+        }
+        reopenScroll(after: 0.4, unlessTyping: true)
+    }
+
+    /// 흐름 중이면 delay 뒤 앞 앱에 스크롤 모드를 다시 연다. 여러 번 불리면 마지막 것만.
+    private func reopenScroll(after delay: Double, unlessTyping: Bool = false) {
+        reopenWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard scrollSession else { return endPopupWait() }
+            if building {
+                reopenScroll(after: 0.1, unlessTyping: unlessTyping)
+                return
+            }
+            if Self.popupOpen() {
+                // 누른 것이 메뉴를 열었다. 스크롤 모드가 키 포커스를 가져가면 VS Code 처럼 웹으로 그린 메뉴는 창이 포커스를
+                // 잃자마자 닫혀서 고를 수가 없다. 닫힐 때까지(항목을 고르거나 Esc) 기다렸다가 연다.
+                // 고른 항목이 입력칸을 열었으면(새 파일 이름 등) 글을 쓰려는 것이라 끝낸다.
+                replace(current)
+                waitForPopup()
+                reopenScroll(after: 0.25, unlessTyping: true)
+                return
+            }
+            endPopupWait()
+            if frontmostBlocked || unlessTyping && Self.typing(except: focusBefore) {
+                scrollSession = false
+                replace(current)
+                return
+            }
+            replace(current)
+            open(.scroll)
+        }
+        reopenWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private static let textInputRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+
+    /// 앞 앱의 키 포커스가 입력칸에 있는지. before 와 같은 요소면 아니라고 본다: VS Code 편집기처럼 원래 있던
+    /// 입력칸으로 포커스가 돌아온 것은 새로 글을 쓰려는 것이 아니다.
+    private static func typing(except before: AXUIElement? = nil) -> Bool {
+        guard let focused = focusedElement(), let role = AX.string(AX.copy(focused, kAXRoleAttribute)),
+              textInputRoles.contains(role) else { return false }
+        return before.map { !CFEqual($0, focused) } ?? true
+    }
+
+    private static func focusedElement() -> AXUIElement? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        return AX.element(AX.copy(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute))
+    }
+
+    /// 웹으로 그린 메뉴(role="menu")도 AXMenu 다
+    private static let popupRoles: Set<String> = ["AXMenu", "AXPopover"]
+
+    /// 앞 앱에 메뉴가 열려 있는지: 앱 메뉴(컨텍스트 메뉴·메뉴 막대), 또는 키 포커스가 메뉴·팝오버 안에 있다
+    private static func popupOpen() -> Bool {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        if !TreeBuilder.openMenus(of: app).isEmpty { return true }
+        var element = AX.element(AX.copy(app, kAXFocusedUIElementAttribute))
+        for _ in 0..<5 {
+            guard let e = element else { break }
+            if let role = AX.string(AX.copy(e, kAXRoleAttribute)), popupRoles.contains(role) { return true }
+            element = AX.element(AX.copy(e, kAXParentAttribute))
+        }
+        return false
+    }
+
+    /// 메뉴가 닫히기를 기다리는 동안에는 떠 있는 모드가 없어 addCancelWatchers 도 없다. 마우스로 누르면 흐름을 끝낸다.
+    private func waitForPopup() {
+        guard popupWait == nil else { return }
+        Log.write("메뉴가 열려 있어 닫힐 때까지 스크롤 모드를 미룸")
+        popupWait = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) {
+            [weak self] _ in
+            self?.scrollSession = false
+            self?.endPopupWait()
+        }
+    }
+
+    private func endPopupWait() {
+        if let popupWait { NSEvent.removeMonitor(popupWait) }
+        popupWait = nil
+    }
+
+    /// 모드가 스스로 닫혔을 때(Esc, 누름 등). 흐름 중이면 이어 갈지 정한다.
+    private func modeEnded(_ mode: Mode, _ kind: ModeKind) {
+        guard scrollSession else { return }
+        switch kind {
+        case .scroll:
+            // 스크롤 모드의 Esc·Enter
+            scrollSession = false
+        case .labels, .search:
+            guard let clicked = (mode as? ClickMode)?.clicked else {
+                reopenScroll(after: 0)  // Esc: 스크롤 모드로 돌아가기
+                return
+            }
+            if Self.textInputRoles.contains(clicked.role) {
+                scrollSession = false  // 입력칸을 눌렀다: 글을 쓰려는 것
+            } else {
+                // 누르기 직전(클릭은 이 뒤에 보낸다)
+                focusBefore = Self.focusedElement()
+                // 누른 뒤 페이지·창이 바뀔 시간을 두고 그 자리에 다시 연다
+                reopenScroll(after: 0.4)
+            }
+        }
     }
 
     private func install(_ mode: Mode, _ kind: ModeKind) {
+        // 기다리던 다시 열기·메뉴 기다리기보다 지금 띄운 것이 먼저다
+        reopenWork?.cancel()
+        endPopupWait()
         mode.onExit = { [weak self, weak mode] in
-            guard let self, self.current === mode else { return }
+            guard let self, let mode, self.current === mode else { return }
             self.current = nil
             self.currentKind = nil
             removeCancelWatchers()
+            if !replacing { modeEnded(mode, kind) }
         }
         current = mode
         currentKind = kind
@@ -215,24 +400,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var mouseWatcher: Any?
     private var appWatcher: NSObjectProtocol?
+    private var spaceWatcher: NSObjectProtocol?
 
-    /// 마우스를 누르거나 다른 앱으로 넘어가면 떠 있는 모드를 닫는다. 테두리·라벨이 다른 곳에 남지 않게.
+    /// 마우스를 누르면 떠 있는 모드를 닫는다. 다른 앱·데스크톱으로 넘어가면, 스크롤 흐름 중이면 그곳에 스크롤 모드를
+    /// 다시 열고 아니면 닫는다. 테두리·라벨이 다른 곳에 남지 않게.
     /// (휠은 지켜보지 않는다: 커서를 옮기는 스크롤 방식에서 Hanmium 이 보낸 휠까지 걸리기 때문)
     private func addCancelWatchers() {
         removeCancelWatchers()
         mouseWatcher = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) {
-            [weak self] _ in self?.current?.stop()
+            [weak self] _ in
+            self?.scrollSession = false
+            self?.current?.stop()
         }
-        appWatcher = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.current?.stop() }
+        let moved: (Notification) -> Void = { [weak self] _ in
+            guard let self else { return }
+            if scrollSession { reopenScroll(after: 0.15) } else { current?.stop() }
+        }
+        let center = NSWorkspace.shared.notificationCenter
+        appWatcher = center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main,
+                                        using: moved)
+        spaceWatcher = center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main,
+                                          using: moved)
     }
 
     private func removeCancelWatchers() {
         if let mouseWatcher { NSEvent.removeMonitor(mouseWatcher) }
-        if let appWatcher { NSWorkspace.shared.notificationCenter.removeObserver(appWatcher) }
+        for watcher in [appWatcher, spaceWatcher].compactMap({ $0 }) {
+            NSWorkspace.shared.notificationCenter.removeObserver(watcher)
+        }
         mouseWatcher = nil
         appWatcher = nil
+        spaceWatcher = nil
     }
 }
 
