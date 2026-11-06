@@ -42,6 +42,8 @@ final class DropletMotion {
     /// 날아가는 물방울: 0 뭉치기, 1 날아가기, 2 퍼지기
     private var phase = 2
     private var phaseTime: CGFloat = 0
+    /// 마지막으로 옮기기 시작한 뒤 흐른 시간
+    private var moveTime: CGFloat = .infinity
 
     init(rect: CGRect, style: FocusMotion, timeScale: CGFloat) {
         self.style = style
@@ -71,8 +73,17 @@ final class DropletMotion {
 
     var isSettled: Bool { phase == 2 && edges.allSatisfy(\.isSettled) }
 
+    /// 0~1. 얼마나 움직이고 있는지(변마다 목표까지 남은 거리 24pt·빠르기 400pt/s 에서 1). 멈출 때 거의 0 까지
+    /// 이어지고 옮기기 시작하면 0.1초 동안 차오른다. 움직이는 동안만 그리는 그림자가 뚝 생기거나 사라지지 않게 쓴다.
+    var activity: CGFloat {
+        guard !isSettled else { return 0 }
+        let level = phase == 2 ? edges.map { max(abs($0.target - $0.x) / 24, abs($0.v) * time / 400) }.max() ?? 0 : 1
+        return min(1, level, moveTime / (0.1 * time))
+    }
+
     func move(to r: CGRect) {
         target = r
+        moveTime = 0
         switch style {
         case .stretch:
             aim(r, lead: 420, trail: 120)
@@ -93,6 +104,7 @@ final class DropletMotion {
 
     func step(_ dt: CGFloat) {
         for _ in 0..<4 { edges.forEach { $0.step(dt / 4) } }
+        moveTime += dt
         guard style == .hop else { return }
         phaseTime += dt
         let r = rect

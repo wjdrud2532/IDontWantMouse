@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var reopenWork: DispatchWorkItem?
     /// 띄우려고 찾는 중에 그만두면 늘려서, 늦게 도착한 결과를 버린다
     private var openToken = 0
+    /// 지난 영역(ScrollCache)으로 먼저 띄운 스크롤 모드와 그 영역. 새로 찾은 결과가 오면 그대로 둘지 바꿀지 정한다.
+    private var provisional: (mode: ScrollMode, snapshot: ScrollSnapshot)?
     /// 라벨을 누르거나 단축키를 넘기기 직전 앞 앱의 키 포커스. 그 뒤 '새' 입력칸으로 갔는지 볼 때 쓴다(typing).
     private var focusBefore: AXUIElement?
     /// 누른 것이 연 메뉴가 닫히기를 기다리는 동안 마우스 누름을 지켜보는 것 (waitForPopup)
@@ -52,8 +54,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 처음 단축키를 누를 때 기다리지 않게 미리: GPU 셰이더 컴파일, 상태 아이콘이 있는 앱 목록
         DispatchQueue.global(qos: .utility).async { _ = GlassGPU.shared }
         ExtrasCache.refreshIfStale(force: true)
+        // 오버레이(패널·흐림 뷰)를 한 번 만들어 둔다. 앱을 켜고 처음 만들 때만 100ms 넘게 걸렸다(띄우지는 않는다).
+        DispatchQueue.main.async {
+            if let screen = NSScreen.main { Overlay(keyScreen: screen, stackedAbove: 1, fades: false).close() }
+        }
         // 유리 라벨의 굴절은 뒤 화면을 찍어서 계산한다. 시스템은 처음 한 번만 묻는다.
-        if GlassSnapshots.usesGlass, !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+        if GlassSnapshots.usesGlass, !GlassSnapshots.captureAllowed { CGRequestScreenCaptureAccess() }
 
         let status = StatusItem()
         status.onToggleEnabled = { [weak self] in
@@ -201,15 +207,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if kind != .search { GlassSnapshots.retake() }
         building = true
         openToken += 1
+        provisional = nil
         let token = openToken
         let builder = TreeBuilder.forFrontmost(front)
+        let pid = front.processIdentifier
         axQueue.async {
             switch kind {
             case .scroll:
+                if let cached = ScrollCache.reusable(for: pid) {
+                    DispatchQueue.main.async {
+                        guard token == self.openToken else { return }
+                        Timing.mark("지난 영역으로 먼저 [\(cached.bundleID ?? "?")] (\(cached.areas.count)개)")
+                        // 띄운 뒤로는 다른 모드를 열 수 있다(그러면 openToken 이 바뀌어 새로 찾은 결과는 버린다)
+                        self.building = false
+                        self.presentScroll(cached, cached: true)
+                        if let mode = self.current as? ScrollMode { self.provisional = (mode, cached) }
+                    }
+                }
                 let snapshot = builder.scrollSnapshot()
+                ScrollCache.store(snapshot)
                 DispatchQueue.main.async {
-                    self.building = false
                     guard token == self.openToken else { return }
+                    if let shown = self.provisional {
+                        self.provisional = nil
+                        // 그사이 닫았거나 다른 모드로 바꿨으면 그대로 둔다
+                        guard self.current === shown.mode else { return }
+                        if shown.snapshot.sameLayout(as: snapshot) {
+                            shown.mode.adopt(snapshot)
+                            return
+                        }
+                        Log.write("새로 찾은 스크롤 영역이 지난 것과 달라서 바꿈")
+                        self.replace(shown.mode)
+                    }
+                    self.building = false
                     self.presentScroll(snapshot)
                 }
             case .labels, .search:
@@ -235,7 +265,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         install(ClickMode(targets: snapshot.elements, kind: kind == .search ? .search : .labels, screen: screen), kind)
     }
 
-    private func presentScroll(_ snapshot: ScrollSnapshot) {
+    /// cached: 지난 영역(ScrollCache)으로 먼저 띄우는 것
+    private func presentScroll(_ snapshot: ScrollSnapshot, cached: Bool = false) {
         guard !snapshot.areas.isEmpty else {
             // 흐름 중이면 옮겨 간 페이지를 아직 그리는 중일 수 있어서 조금 더 기다려 본다
             if scrollSession, emptyRetries < 3 {
@@ -249,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         emptyRetries = 0
-        Timing.mark("영역 찾기 [\(snapshot.bundleID ?? "?")] (\(snapshot.areas.count)개)")
+        if !cached { Timing.mark("영역 찾기 [\(snapshot.bundleID ?? "?")] (\(snapshot.areas.count)개)") }
         let anchor = snapshot.windows.indices.contains(snapshot.focusedWindow)
             ? snapshot.windows[snapshot.focusedWindow].frame : nil
         let mode = ScrollMode(snapshot: snapshot, screen: Screens.screen(for: anchor))

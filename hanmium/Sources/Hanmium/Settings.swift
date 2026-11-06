@@ -104,6 +104,7 @@ struct SettingsView: View {
     @AppStorage("slabRefraction", store: Config.defaults) private var slabRefraction = 1.0
     @AppStorage("slabBezel", store: Config.defaults) private var slabBezel = Config.defaultSlabBezel
     @AppStorage("slabFullRefraction", store: Config.defaults) private var slabFullRefraction = true
+    @AppStorage("backgroundRefraction", store: Config.defaults) private var backgroundRefraction = true
     @AppStorage("glassSpecular", store: Config.defaults) private var glassSpecular = 1.0
     @AppStorage("glassBlur", store: Config.defaults) private var glassBlur = 1.0
     @AppStorage("glassTint", store: Config.defaults) private var glassTint = 1.0
@@ -391,12 +392,16 @@ struct SettingsView: View {
                     Text("\(Int(slabBezel))pt").monospacedDigit().frame(width: 40)
                 }
                 .disabled(!inactiveAreaShown || slabFullRefraction)
+                Toggle("배경도 굴절", isOn: $backgroundRefraction)
+                    .disabled(!inactiveAreaShown)
             }
             note("같은 창에서 숫자·Tab 으로 옮겨갈 수 있는 다른 영역(WezTerm·VS Code 분할 창 등)입니다. "
                 + "리퀴드 글래스는 영역 위에 유리판을 얹어 가장자리가 굴절되고 빛나며, 점선은 점선과 옅은 칠로 구분합니다. "
                 + "영역 전체 굴절을 켜면 영역 전체가 볼록렌즈처럼 휘고(가장자리 빛은 바깥쪽에만), 끄면 굴절 범위만큼 "
                 + "가장자리에서 안쪽으로 휩니다(작은 영역은 짧은 변의 절반까지). 굴절 강도는 휘는 정도입니다. "
-                + "휘어 보이는 내용은 스크롤 모드 동안 1초마다 새 화면으로 바뀝니다.")
+                + "휘어 보이는 내용은 스크롤 모드 동안 1초마다 새 화면으로 바뀝니다. "
+                + "테두리 둘레는 옮기는 동안에도 멈춘 뒤에도 휜 채로 있습니다. 배경도 굴절을 켜면 유리판이 없는 곳"
+                + "(창의 나머지, 다른 창, 배경화면)도 테두리 둘레가 유리판 안에서처럼 휩니다.")
         }
     }
 
@@ -533,6 +538,7 @@ struct SettingsView: View {
         slabRefraction = 1
         slabBezel = Config.defaultSlabBezel
         slabFullRefraction = true
+        backgroundRefraction = true
         inactiveAreaStyle = AreaStyle.glass.rawValue
         inactiveAreaColor = ""
         inactiveLineOpacity = Config.defaultInactiveLineOpacity

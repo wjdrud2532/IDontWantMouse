@@ -153,7 +153,7 @@ enum LiquidGlass {
                 out[i + 3] = UInt8(coverage * 255)
             }
         }
-        guard let image = makeImage(out, w, h) else { return nil }
+        guard let image = makeImage(out, w, h, snap.colorSpace) else { return nil }
         return Look(image: image, dark: dark)
     }
 
@@ -169,7 +169,7 @@ enum LiquidGlass {
         let s = snap.scale
         let frame = ring ? rect.insetBy(dx: -width, dy: -width) : rect
         let w = Int((frame.width * s).rounded()), h = Int((frame.height * s).rounded())
-        guard w > 4, h > 4, let tc = tint.usingColorSpace(.sRGB) else { return nil }
+        guard w > 4, h > 4, let tc = tint.usingColorSpace(snap.tintSpace) else { return nil }
         let tr = tc.redComponent, tg = tc.greenComponent, tb = tc.blueComponent
         // 영역 사각형(픽셀, frame 기준)
         let inset = ring ? width * s : 0
@@ -252,14 +252,14 @@ enum LiquidGlass {
                 }
             }
         }
-        guard let image = makeImage(out, w, h) else { return nil }
+        guard let image = makeImage(out, w, h, snap.colorSpace) else { return nil }
         return (image, frame)
     }
 
-    private static func makeImage(_ rgba: [UInt8], _ w: Int, _ h: Int) -> CGImage? {
+    private static func makeImage(_ rgba: [UInt8], _ w: Int, _ h: Int, _ space: CGColorSpace) -> CGImage? {
         guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
         return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                       space: space,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
@@ -314,6 +314,11 @@ final class ScreenSnapshot {
     let width: Int
     let height: Int
     let bgra: Bool
+    /// 픽셀 값이 놓인 색 공간(찍은 화면의 색 공간). 이 사진으로 그린 유리도 이 공간을 붙여야 살아 있는 화면과
+    /// 색이 똑같다(연속 캡처 프레임은 화면 색 공간 값인데 sRGB 로 붙였더니 배경 띠가 막처럼 떠 보였다).
+    let colorSpace: CGColorSpace
+    /// 유리 색(tint)을 이 공간 값으로 바꿀 때
+    private(set) lazy var tintSpace: NSColorSpace = NSColorSpace(cgColorSpace: colorSpace) ?? .sRGB
     private let pixels: [UInt8]
     private var red: Int { bgra ? 2 : 0 }
     private var blue: Int { bgra ? 0 : 2 }
@@ -337,6 +342,7 @@ final class ScreenSnapshot {
         self.axFrame = axFrame
         scale = CGFloat(width) / axFrame.width
         bgra = true
+        colorSpace = CVImageBufferGetColorSpace(pb)?.takeUnretainedValue() ?? CGColorSpace(name: CGColorSpace.sRGB)!
         pixels = buffer
     }
 
@@ -347,15 +353,21 @@ final class ScreenSnapshot {
         self.axFrame = axFrame
         scale = CGFloat(width) / axFrame.width
         bgra = false
+        // 사진 자체 색 공간 그대로 옮긴다(바꾸지 않아서 값이 그대로다)
+        let own = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let drawn = buffer.withUnsafeMutableBytes { raw -> Bool in
-            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
+        let drawn = buffer.withUnsafeMutableBytes { raw -> CGColorSpace? in
+            for space in [own, CGColorSpace(name: CGColorSpace.sRGB)].compactMap({ $0 }) {
+                guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+                ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return space
+            }
+            return nil
         }
-        guard drawn else { return nil }
+        guard let drawn else { return nil }
+        colorSpace = drawn
         pixels = buffer
     }
 
@@ -411,7 +423,20 @@ enum GlassSnapshots {
             || (Config.inactiveAreaShown && Config.inactiveAreaStyle == .glass)
     }
 
-    static var wanted: Bool { usesGlass && CGPreflightScreenCaptureAccess() }
+    static var wanted: Bool { usesGlass && captureAllowed }
+
+    /// 화면 기록 권한. 한 번 묻는 데 10~20ms 걸리고 모드를 열 때마다 서너 번 불러서(메인 스레드), 허용된 뒤로는 다시
+    /// 묻지 않는다. 아직 없으면 5초마다 다시 묻는다(설정에서 허용하면 곧 쓴다).
+    static var captureAllowed: Bool {
+        if allowed { return true }
+        let now = CACurrentMediaTime()
+        guard now - allowedCheckedAt >= 5 else { return false }
+        allowedCheckedAt = now
+        allowed = CGPreflightScreenCaptureAccess()
+        return allowed
+    }
+    private static var allowed = false
+    private static var allowedCheckedAt: CFTimeInterval = -.infinity
 
     /// 새 모드를 열 때: 지난 사진은 버리고 찍는다. 오버레이가 뜨기 전이라 Hanmium 창은 찍히지 않는다.
     static func retake() {
@@ -431,16 +456,38 @@ enum GlassSnapshots {
     private static var stream: ScreenStream?
 
     /// 스크롤 모드를 열 때: 오버레이 창은 빼고 화면을 계속 받는다. 프레임은 wantLive 로 바란 동안만 사진으로 바꾼다.
+    /// 모드를 열며 찍는 사진이 아직 오지 않았으면 그 뒤에 시작한다(같이 시작하면 화면 목록 받기·스트림 준비와 겹쳐서
+    /// 첫 굴절이 늦어진다).
     static func startStream(excluding windows: [CGWindowID]) {
         guard wanted, stream == nil else { return }
+        if capturing {
+            pendingStream = windows
+            return
+        }
         let s = ScreenStream()
         stream = s
         s.start(screens: screenInfo(), excluding: windows)
     }
 
     static func stopStream() {
+        pendingStream = nil
         stream?.stop()
         stream = nil
+    }
+
+    /// 한 장씩 찍는 중인지(마지막으로 시작한 찍기의 번호), 그 뒤에 시작할 연속 캡처(뺄 창)
+    private static var capturing = false
+    private static var capturingGen = 0
+    private static var pendingStream: [CGWindowID]?
+
+    /// 찍기가 끝났다(사진이 왔든 못 찍었든). 기다리던 연속 캡처를 시작한다.
+    private static func captureEnded(_ gen: Int) {
+        guard gen == capturingGen else { return }
+        capturing = false
+        if let windows = pendingStream {
+            pendingStream = nil
+            startStream(excluding: windows)
+        }
     }
 
     /// 지금부터 seconds 동안 들어오는 프레임을 굴절에 바로 쓴다 (물방울이 움직이거나 스크롤하는 동안).
@@ -532,8 +579,11 @@ enum GlassSnapshots {
         guard wanted, #available(macOS 14.0, *) else { return }
         generation += 1
         let gen = generation
+        capturing = true
+        capturingGen = gen
         let screens = screenInfo()
         let finish = { (snaps: [ScreenSnapshot]) in
+            defer { captureEnded(gen) }
             guard gen == generation, !snaps.isEmpty else { return }
             Timing.mark("화면 캡처 도착")
             current = snaps
@@ -560,7 +610,7 @@ enum GlassSnapshots {
             return
         }
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { content, _ in
-            guard let content else { return }
+            guard let content else { return DispatchQueue.main.async { captureEnded(gen) } }
             let group = DispatchGroup()
             let lock = NSLock()
             var snaps: [ScreenSnapshot] = []
@@ -622,7 +672,7 @@ final class GlassSource {
                           width: (job.rect.width * s).rounded(), height: (job.rect.height * s).rounded()),
              forceDark: job.forceDark)
         }
-        for (job, look) in zip(missing, gpu.renderPills(pixelRects, from: texture)) {
+        for (job, look) in zip(missing, gpu.renderPills(pixelRects, from: texture, space: snapshot.colorSpace)) {
             if let look { cache[key(job.rect, job.forceDark)] = look }
         }
     }
@@ -653,13 +703,15 @@ final class GlassSource {
     }
 
     /// 영역 rect 에서 hole(둥근 사각형, 움직이는 테두리 바깥)을 뺀 유리판(GPU). 테두리가 움직이는 동안 매 장면
-    /// 새로 그리므로 캐시하지 않는다. 띠 안쪽의 옅은 칠까지 담겨 있다. GPU 를 못 쓰면 nil.
+    /// 새로 그리므로 캐시하지 않는다. 띠 안쪽의 옅은 칠까지 담겨 있다. parts 를 주면 판에서 그 부분들만 한 장씩,
+    /// 없으면 판 전체 한 장. cuts(둥근 모서리 cutRadius) 자리는 비운다. GPU 를 못 쓰면 빈 배열.
     func carvedSlab(_ rect: CGRect, cornerRadius: CGFloat, hole: CGRect, holeRadius: CGFloat, bezel: CGFloat,
                     thickness: CGFloat, power: CGFloat, rim: CGFloat, dome: Bool = false, holeBezel: CGFloat = 0,
                     holeThickness: CGFloat = 0, tint: NSColor, tintAlpha: CGFloat,
-                    saturation: CGFloat = LiquidGlass.saturation, specular: CGFloat) -> CGImage? {
-        guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(.sRGB)
-        else { return nil }
+                    saturation: CGFloat = LiquidGlass.saturation, specular: CGFloat, parts: [CGRect] = [],
+                    cuts: [CGRect] = [], cutRadius: CGFloat = 0) -> [CGImage?] {
+        guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(snapshot.tintSpace)
+        else { return [] }
         let s = snapshot.scale
         let hr = min(holeRadius, hole.width / 2, hole.height / 2) * s
         let job = GlassGPU.HoleJob(
@@ -671,15 +723,26 @@ final class GlassSource {
             thickness: Float(thickness * s), power: Float(power), smooth: Float(10 * s), tintAlpha: Float(tintAlpha),
             saturation: Float(saturation), tintR: Float(tc.redComponent), tintG: Float(tc.greenComponent),
             tintB: Float(tc.blueComponent), specular: Float(specular), rim: Float(rim * s), dome: dome ? 1 : 0,
-            holeBezel: Float(holeBezel * s), holeThickness: Float(holeThickness * s))
-        return gpu.renderHole(job, from: texture)
+            holeBezel: Float(holeBezel * s), holeThickness: Float(holeThickness * s), cutRadius: Float(cutRadius * s))
+        // 판 왼쪽 위 기준 픽셀
+        let local = { (r: CGRect) in
+            SIMD4<Float>(Float(((r.minX - rect.minX) * s).rounded()), Float(((r.minY - rect.minY) * s).rounded()),
+                         Float((r.width * s).rounded()), Float((r.height * s).rounded()))
+        }
+        let jobs = parts.isEmpty ? [job] : parts.map { part -> GlassGPU.HoleJob in
+            var j = job
+            let p = local(part)
+            (j.outX, j.outY, j.outW, j.outH) = (p.x, p.y, p.z, p.w)
+            return j
+        }
+        return gpu.renderHole(jobs, cuts: cuts.map(local), from: texture, space: snapshot.colorSpace)
     }
 
     /// LiquidGlass.renderEdge 와 같은 값을 사진 픽셀 기준으로 계산해 GPU 로 그린다
     private func gpuEdge(_ rect: CGRect, ring: Bool, width: CGFloat, cornerRadius: CGFloat, tint: NSColor,
                          tintAlpha: CGFloat, saturation: CGFloat, specular: CGFloat, fill: CGFloat,
                          thickness: CGFloat?, power: CGFloat, rim: CGFloat?, dome: Bool) -> (image: CGImage, frame: CGRect)? {
-        guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(.sRGB)
+        guard let gpu = GlassGPU.shared, let texture = snapshot.gpuTexture, let tc = tint.usingColorSpace(snapshot.tintSpace)
         else { return nil }
         let s = snapshot.scale
         let frame = ring ? rect.insetBy(dx: -width, dy: -width) : rect
@@ -694,7 +757,7 @@ final class GlassSource {
                               tint: (tc.redComponent, tc.greenComponent, tc.blueComponent), tintAlpha: tintAlpha,
                               saturation: saturation, specular: specular, fill: fill,
                               thickness: (thickness ?? (ring ? width / 2 : width)) * s, power: power,
-                              rim: (rim ?? 0) * s, dome: dome, from: texture).map { ($0, frame) }
+                              rim: (rim ?? 0) * s, dome: dome, from: texture, space: snapshot.colorSpace).map { ($0, frame) }
     }
 }
 

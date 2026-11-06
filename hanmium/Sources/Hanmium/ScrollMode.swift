@@ -27,8 +27,9 @@ final class ScrollMode: Mode {
     private var adoptKeyWindowUntil: CFTimeInterval = 0
     private let pid: pid_t
     private let bundleID: String?
-    private let windows: [Element]
-    private let areas: [(area: Element, window: Int)]
+    /// 지난 영역으로 먼저 띄웠으면 새로 찾은 같은 자리의 요소로 바뀐다(adopt)
+    private var windows: [Element]
+    private var areas: [(area: Element, window: Int)]
     private var index = 0
     /// 휠 이벤트를 보낼 위치
     private var scrollPoint = CGPoint.zero { didSet { driver.setAim(.init(target: target, point: scrollPoint)) } }
@@ -46,11 +47,15 @@ final class ScrollMode: Mode {
     private var glassRefresh: DispatchWorkItem?
     /// 연 창과 그때의 포커스. 닫을 때 마지막 영역과 함께 기억해 둔다(ScrollMemory).
     private let windowID: CGWindowID?
-    private let focusAtStart: CGRect?
+    private var focusAtStart: CGRect?
+    /// 키를 하나라도 눌렀는지. 지난 영역으로 먼저 띄운 뒤 새로 찾은 결과로 시작 영역을 고칠지 볼 때 쓴다(adopt).
+    private var touched = false
     /// 고른 영역 테두리를 물방울처럼 옮기는 중인 움직임
     private var motion: DropletMotion?
     /// 고르지 않은 영역마다 그려 둔 유리판 굴절 가장자리. 그 영역을 다시 고르면 지운다.
     private var slabEdges: [Int: (image: CGImage, frame: CGRect)] = [:]
+    /// 멈춰 있는 테두리 둘레를 판 유리(가까운 영역 유리판·배경). 테두리가 다시 움직이거나 새 화면이 오면 지운다.
+    private var restGlass: [String: [(frame: CGRect, image: CGImage)]] = [:]
     /// 유리판 가장자리 띠는 사진으로 그려 두어서, 띠 밑 내용(다른 분할 창의 출력)이 바뀌면 띠만 멈춰 보인다.
     /// 1초마다 새 화면을 한 장 받아 다시 그린다(화면이 그대로면 새 장이 오지 않는다).
     private var slabRefreshTimer: Timer?
@@ -83,19 +88,51 @@ final class ScrollMode: Mode {
         focusAtStart = snapshot.focus
         keyWindow = snapshot.keyWindow
         windowID = focusedWindow
-        // 포커스가 그대로면 마지막으로 쓰던 영역, 바뀌었으면 포커스가 있는 영역, 둘 다 없으면 가장 큰 영역에서 시작
-        let remembered = focusedWindow.flatMap { ScrollMemory.entries[$0] }.flatMap { entry -> Int? in
-            guard entry.focus.map({ f in snapshot.focus.map { $0.isClose(to: f, tolerance: 6) } ?? false })
-                    ?? (snapshot.focus == nil) else { return nil }
-            return snapshot.areas.firstIndex { $0.area.visibleFrame.isClose(to: entry.area, tolerance: 12) }
-        }
-        index = remembered ?? snapshot.focusedArea ?? largestArea(inWindow: snapshot.focusedWindow) ?? 0
+        let (start, remembered) = Self.startIndex(for: snapshot, window: focusedWindow)
+        index = start
         let r = { (f: CGRect?) in f.map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height)))" } ?? "-" }
         Log.write("스크롤 모드 열림 [\(snapshot.bundleID ?? "?")] 창 \(focusedWindow.map(String.init) ?? "-") "
             + "영역 \(snapshot.areas.map { r($0.area.visibleFrame) }.joined(separator: " ")) | 포커스 \(r(snapshot.focus)) "
             + "→ 포커스 영역 \(snapshot.focusedArea.map(String.init) ?? "-"), 기억 \(remembered.map(String.init) ?? "-") "
             + "(기억된 것: \(r(focusedWindow.flatMap { ScrollMemory.entries[$0] }?.area)), "
             + "그때 포커스 \(r(focusedWindow.flatMap { ScrollMemory.entries[$0] }?.focus))) → 시작 \(index)")
+    }
+
+    /// 포커스가 그대로면 마지막으로 쓰던 영역, 바뀌었으면 포커스가 있는 영역, 둘 다 없으면 가장 큰 영역에서 시작
+    private static func startIndex(for snapshot: ScrollSnapshot, window: CGWindowID?) -> (index: Int, remembered: Int?) {
+        let remembered = window.flatMap { ScrollMemory.entries[$0] }.flatMap { entry -> Int? in
+            guard entry.focus.map({ f in snapshot.focus.map { $0.isClose(to: f, tolerance: 6) } ?? false })
+                    ?? (snapshot.focus == nil) else { return nil }
+            return snapshot.areas.firstIndex { $0.area.visibleFrame.isClose(to: entry.area, tolerance: 12) }
+        }
+        let size = { (e: Element) in e.visibleFrame.width * e.visibleFrame.height }
+        let largest = snapshot.areas.indices.filter { snapshot.areas[$0].window == snapshot.focusedWindow }
+            .max { size(snapshot.areas[$0].area) < size(snapshot.areas[$1].area) }
+        return (remembered ?? snapshot.focusedArea ?? largest ?? 0, remembered)
+    }
+
+    /// 지난 영역으로 먼저 띄운 뒤 새로 찾은 결과가 같은 자리일 때(AppDelegate): 닫았다 열지 않고(깜빡인다) 새 요소로
+    /// 바꿔 끼운다(탭을 바꾸면 자리는 같고 요소만 다르다). 포커스도 새 것으로 두고, 아직 키를 누르지 않았으면
+    /// 새 포커스로 정한 시작 영역으로 옮긴다(그사이 앱에서 포커스를 옮겼을 때).
+    func adopt(_ snapshot: ScrollSnapshot) {
+        guard !stopped else { return }
+        let changed = !CFEqual(current.ref, snapshot.areas[index].area.ref)
+        windows = snapshot.windows
+        areas = snapshot.areas
+        focusAtStart = snapshot.focus
+        keyWindow = snapshot.keyWindow
+        if changed, target != nil {
+            // 휠을 보낼 지점이 맞는지 볼 표지는 새 요소에서 다시 찾는다
+            aimConfirmed = false
+            checking = nil
+            findProbe()
+        }
+        guard !touched else { return }
+        let start = Self.startIndex(for: snapshot, window: windowID).index
+        if start != index {
+            Log.write("새로 찾은 포커스로 시작 영역 \(index) → \(start)")
+            focus(start)
+        }
     }
 
     func start() {
@@ -108,13 +145,16 @@ final class ScrollMode: Mode {
         if glassLabels { GlassSnapshots.startStream(excluding: overlay.windowIDs) }
         focus(index)
         watchStale()
-        if glassLabels, Config.inactiveAreaShown, Config.inactiveAreaStyle == .glass, areas.count > 1 {
+        // 영역이 하나뿐이어도 배경 굴절(테두리 둘레)은 그려 두므로 새 화면으로 다시 그린다
+        if glassLabels, Config.inactiveAreaShown, Config.inactiveAreaStyle == .glass,
+           areas.count > 1 || Config.backgroundRefraction {
             slabObserver = NotificationCenter.default.addObserver(forName: GlassSnapshots.didChange, object: nil,
                                                                   queue: .main) { [weak self] _ in
                 // 스크롤하는 동안에는 화면이 초당 수십 장 와서 1초에 한 번만
                 guard let self, !stopped, CACurrentMediaTime() - slabsDrawnAt >= 0.9 else { return }
                 slabsDrawnAt = CACurrentMediaTime()
                 slabEdges.removeAll()
+                restGlass.removeAll()
                 overlay.redraw()
             }
             slabRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -187,19 +227,39 @@ final class ScrollMode: Mode {
         let blob = motion?.rect ?? current.visibleFrame
         if Config.inactiveAreaShown, Config.inactiveAreaStyle == .glass {
             let color = Config.inactiveAreaColor, fill = Config.inactiveFillOpacity
-            // 테두리가 움직이는 동안은 유리판 = 영역 − 움직이는 테두리(유리 막대 바깥까지). 갈 영역에도 유리판이 남아 있다가
-            // 테두리 모양대로 파이고, 떠난 영역은 테두리가 빠져나가는 모양대로 차오른다.
-            let hole: (rect: CGRect, radius: CGFloat)? = !moving ? nil
-                : Config.scrollBorderShown && Config.scrollBorderStyle == .glass
+            // 유리판 = 영역 − 테두리(유리 막대 바깥까지). 갈 영역에도 유리판이 남아 있다가 테두리 모양대로 파이고,
+            // 떠난 영역은 테두리가 빠져나가는 모양대로 차오른다. 멈춘 뒤에도 테두리 둘레는 휜 채로 남는다.
+            let hole: (rect: CGRect, radius: CGFloat) = Config.scrollBorderShown && Config.scrollBorderStyle == .glass
                 ? Draw.ringOuter(blob, band: Draw.ringBand(width), stretch: motion?.stretch ?? 0, lens: motion?.lens ?? 0)
                 : (blob, Draw.blobRadius(blob, stretch: motion?.stretch ?? 0, lens: motion?.lens ?? 0))
-            for (i, a) in areas.enumerated() where (i != index || hole != nil) && a.window == currentWindow
-                && rect.intersects(a.area.visibleFrame) {
+            // 움직이는 동안은 매 장면 새로 그리고, 멈추면 한 번 그려 두고 쓴다(1초마다 새 화면으로 다시 그림).
+            // 라벨 자리만 모으는 빈 그리기(Draw.collecting)나 화면 사진이 오기 전에는 아무것도 그려지지 않으니 남겨 두지 않는다.
+            let glass = { [self] (key: String, make: () -> [(frame: CGRect, image: CGImage)]) in
+                if moving || Draw.collecting != nil || Draw.glassSource == nil { return make() }
+                let key = "\(key) \(rect.origin)"
+                if let kept = restGlass[key] { return kept }
+                let made = make()
+                restGlass[key] = made
+                return made
+            }
+            if Config.backgroundRefraction {
+                // 유리판이 없는 곳(창의 나머지, 다른 창, 배경화면)도 테두리 둘레가 휜다. 영역 유리판은 그 위에 그린다.
+                Draw.draw(glass("배경") {
+                    Draw.carvedBackground(rect, hole: hole.rect, holeRadius: hole.radius,
+                                          excluding: areas.filter { $0.window == currentWindow }.map(\.area.visibleFrame))
+                })
+            }
+            for (i, a) in areas.enumerated() where a.window == currentWindow && rect.intersects(a.area.visibleFrame) {
                 let slab = a.area.visibleFrame
-                // 테두리가 닿는(굴절 띠 안에 들어오는) 영역만 매 장면 새로 그린다
-                if let hole, hole.rect.insetBy(dx: -Draw.slabBezel(for: slab), dy: -Draw.slabBezel(for: slab)).intersects(slab) {
-                    if hole.rect.contains(slab)
-                        || Draw.carvedGlassArea(slab, hole: hole.rect, holeRadius: hole.radius, color: color, fillOpacity: fill) {
+                if hole.rect.contains(slab) { continue }
+                // 테두리가 닿는(굴절 띠 안에 들어오는) 영역은 테두리 모양을 뺀 유리판으로
+                if hole.rect.insetBy(dx: -Draw.slabBezel(for: slab), dy: -Draw.slabBezel(for: slab)).intersects(slab) {
+                    let carved = glass("영역 \(i)") {
+                        Draw.carvedGlassArea(slab, hole: hole.rect, holeRadius: hole.radius, color: color,
+                                             fillOpacity: fill).map { [$0] } ?? []
+                    }
+                    if !carved.isEmpty || Draw.collecting != nil {
+                        Draw.draw(carved)
                         continue
                     }
                     if i == index { continue }  // GPU 를 못 쓰면 예전처럼 고른 영역은 비운다
@@ -208,7 +268,7 @@ final class ScrollMode: Mode {
                 if slabEdges[i] == nil {
                     slabEdges[i] = Draw.glassAreaEdge(slab, color: color, fillOpacity: fill)
                 }
-                Draw.glassArea(slab, selected: hole == nil ? current.visibleFrame : .zero, color: color, fillOpacity: fill,
+                Draw.glassArea(slab, selected: moving ? .zero : current.visibleFrame, color: color, fillOpacity: fill,
                                edge: slabEdges[i])
             }
         } else if Config.inactiveAreaShown {
@@ -228,7 +288,7 @@ final class ScrollMode: Mode {
             let band = Draw.ringBand(width)
             if rect.intersects(blob.insetBy(dx: -band * 2, dy: -band * 2)) {
                 Draw.glassRing(blob, color: Config.scrollBorderColor, band: band, stretch: stretch, lens: lens,
-                               moving: moving)
+                               moving: moving, shadow: motion?.activity ?? 0)
             }
         } else if Config.scrollBorderShown, rect.intersects(blob) {
             let color = Config.scrollBorderColor
@@ -287,6 +347,7 @@ final class ScrollMode: Mode {
     private func focus(_ i: Int) {
         index = (i + areas.count) % areas.count
         slabEdges[index] = nil
+        restGlass.removeAll()
         moveBorder()
         let window = windows[currentWindow]
         target = directTarget(for: window)
@@ -460,6 +521,7 @@ final class ScrollMode: Mode {
     }
 
     private func keyDown(_ event: NSEvent) {
+        touched = true
         if event.keyCode == 53 {
             stop()
             return
@@ -609,6 +671,7 @@ final class ScrollMode: Mode {
 struct WindowStack {
     struct Entry {
         let pid: pid_t
+        let id: CGWindowID
         let bounds: CGRect
     }
 
@@ -622,13 +685,74 @@ struct WindowStack {
             guard (w[kCGWindowLayer as String] as? Int) == 0,
                   (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != own,
+                  let id = w[kCGWindowNumber as String] as? CGWindowID,
                   let dict = w[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary) else { return nil }
-            return Entry(pid: pid, bounds: bounds)
+            return Entry(pid: pid, id: id, bounds: bounds)
         })
     }
 
     func topmost(at p: CGPoint) -> Entry? { entries.first { $0.bounds.contains(p) } }
+}
+
+/// 앱마다 마지막으로 찾은 스크롤 영역. 다시 열 때(창을 바꿨다 돌아오기, 라벨을 누른 뒤, 단축키) 창 배치가 그대로이고
+/// 영역 요소가 아직 있으면, 찾기(50~230ms)를 기다리지 않고 이것으로 먼저 띄운다. 찾기는 뒤에서 그대로 하고
+/// 결과가 다르면 바꾼다(AppDelegate.open).
+enum ScrollCache {
+    private static let lock = NSLock()
+    private static var entries: [pid_t: (snapshot: ScrollSnapshot, at: CFTimeInterval)] = [:]
+
+    static func store(_ snapshot: ScrollSnapshot) {
+        lock.lock()
+        if snapshot.areas.isEmpty {
+            entries[snapshot.pid] = nil
+        } else {
+            entries[snapshot.pid] = (snapshot, CACurrentMediaTime())
+        }
+        lock.unlock()
+    }
+
+    /// 지금도 맞으면 돌려준다. 앱의 요소를 물어서 백그라운드에서 부른다. 1분이 지났거나, 앱의 맨 앞 창이 다르거나,
+    /// 창 위치·크기가 바뀌었거나, 영역 요소가 사라졌으면(웹 페이지를 옮기면 새로 만든다) nil.
+    static func reusable(for pid: pid_t) -> ScrollSnapshot? {
+        lock.lock()
+        let entry = entries[pid]
+        lock.unlock()
+        guard let entry, CACurrentMediaTime() - entry.at < 60 else { return nil }
+        let snap = entry.snapshot
+        guard snap.windows.indices.contains(snap.focusedWindow) else { return nil }
+        // 창 배치는 창 서버 목록으로 본다(앱에 묻지 않아 빠르다). 앞에서부터 차례라 그 앱의 첫 창이 맨 앞 창이다.
+        let shown = WindowStack.current().entries.filter { $0.pid == pid }
+        guard let front = shown.first,
+              AX.windowID(snap.windows[snap.focusedWindow].ref) == front.id else { return nil }
+        for w in snap.windows {
+            guard let id = AX.windowID(w.ref), let e = shown.first(where: { $0.id == id }),
+                  e.bounds.isClose(to: w.frame, tolerance: 1) else { return nil }
+        }
+        for a in snap.areas {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(a.area.ref, kAXRoleAttribute as CFString, &value) == .invalidUIElement {
+                return nil
+            }
+        }
+        return snap
+    }
+}
+
+extension ScrollSnapshot {
+    /// 같은 창·영역 자리인지(요소는 달라도 된다). 지난 영역으로 먼저 띄운 것을 그대로 두고 요소만 바꿔 끼울지 볼 때 쓴다.
+    func sameLayout(as other: ScrollSnapshot) -> Bool {
+        let close = { (a: CGRect, b: CGRect) in a.isClose(to: b, tolerance: 2) }
+        return pid == other.pid && focusedWindow == other.focusedWindow
+            && windows.count == other.windows.count && areas.count == other.areas.count
+            && zip(windows, other.windows).allSatisfy {
+                AX.windowID($0.ref) == AX.windowID($1.ref) && close($0.frame, $1.frame)
+            }
+            && zip(areas, other.areas).allSatisfy {
+                $0.window == $1.window && close($0.area.visibleFrame, $1.area.visibleFrame)
+                    && $0.area.wezTermPane == $1.area.wezTermPane
+            }
+    }
 }
 
 /// 창마다 마지막으로 고른 스크롤 영역과 그때의 키보드 포커스. 다음에 열 때 포커스가 그대로면 그 영역에서 이어 간다.
@@ -645,17 +769,22 @@ enum ScrollMemory {
 enum Log {
     private static let url = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Hanmium.log")
+    /// 파일 쓰기(한 줄 1~2ms)는 뒤에서 차례로. 모드를 여는 동안 메인 스레드를 막지 않는다.
+    private static let queue = DispatchQueue(label: "Hanmium.log", qos: .utility)
+    private static let stamp = ISO8601DateFormatter()
 
     static func write(_ line: String) {
-        let stamp = ISO8601DateFormatter().string(from: Date())
-        guard let data = "\(stamp) \(line)\n".data(using: .utf8) else { return }
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-        if size < 1_000_000, let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            try? data.write(to: url)
+        let date = Date()
+        queue.async {
+            guard let data = "\(stamp.string(from: date)) \(line)\n".data(using: .utf8) else { return }
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+            if size < 1_000_000, let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: url)
+            }
         }
     }
 }

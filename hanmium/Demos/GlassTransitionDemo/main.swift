@@ -7,7 +7,8 @@ import AppKit
 //   오른쪽 틀 모양 그대로: 유리판 = 영역 − 움직이는 테두리(바깥 유리 막대까지). 매 장면 그 모양의 가장자리를
 //          새로 구해 굴절시킨다. 테두리가 빠져나가는 자리에는 테두리 모양 그대로 유리가 차오르고,
 //          들어가는 영역은 테두리 모양대로 파인다. 앱에 들어간 코드(ScrollMode.paint 와 같은 순서,
-//          Draw.carvedGlassArea)를 그대로 쓴다.
+//          Draw.carvedGlassArea)를 그대로 쓴다. 유리판이 없는 틈·위쪽(배경화면 자리)도 테두리 둘레가 휜다
+//          (Draw.carvedBackground). 멈춘 뒤에도 테두리 둘레는 휜 채로 남는다.
 //
 // 1~4·Tab: 영역 이동  Space: 자동 재생  Esc: 닫기
 //   --frame <n> <png>  창 없이, 영역 2 → 4 로 옮기기 시작해 n 장면 뒤를 그린다(확인용)
@@ -71,8 +72,17 @@ final class PaneDemo: NSView {
     }
 
     private func drawMock() {
-        NSColor(srgbRed: 0.10, green: 0.11, blue: 0.14, alpha: 1).setFill()
-        bounds.fill()
+        // 배경화면: 영역 사이 틈·위쪽 띠에서 테두리 둘레가 휘는 것이 보이게 사선 줄무늬
+        NSGradient(colors: [NSColor(srgbRed: 0.16, green: 0.12, blue: 0.30, alpha: 1),
+                            NSColor(srgbRed: 0.05, green: 0.25, blue: 0.32, alpha: 1)])?.draw(in: bounds, angle: 20)
+        NSColor(white: 1, alpha: 0.18).setStroke()
+        for x in stride(from: -bounds.height, to: bounds.width, by: 14) {
+            let stripe = NSBezierPath()
+            stripe.move(to: CGPoint(x: x, y: 0))
+            stripe.line(to: CGPoint(x: x + bounds.height, y: bounds.height))
+            stripe.lineWidth = 3
+            stripe.stroke()
+        }
         let mono = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         func line(_ s: String, _ c: NSColor, _ p: CGPoint, font: NSFont = mono) {
             NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: c]).draw(at: p)
@@ -140,24 +150,25 @@ final class PaneDemo: NSView {
                 Draw.glassArea(p, selected: panes[selected], color: color, fillOpacity: fill,
                                edge: Draw.glassAreaEdge(p, color: color, fillOpacity: fill))
             case .shaped:
-                // ScrollMode.paint 와 같다: 움직이는 동안 테두리가 닿는 영역은 영역 − 테두리 모양을 매 장면 새로 굴절
-                let moving = !motion.isSettled
-                if moving {
-                    let hole = Draw.ringOuter(blob, band: band, stretch: motion.stretch, lens: motion.lens)
-                    if hole.rect.insetBy(dx: -bezel, dy: -bezel).intersects(p) {
-                        if hole.rect.contains(p)
-                            || Draw.carvedGlassArea(p, hole: hole.rect, holeRadius: hole.radius, color: color,
-                                                    fillOpacity: fill) { continue }
-                    }
-                } else if i == selected {
+                // ScrollMode.paint 와 같다: 유리판 = 영역 − 테두리 모양. 멈춘 뒤에도 테두리 둘레는 휜 채로 남는다.
+                let hole = Draw.ringOuter(blob, band: band, stretch: motion.stretch, lens: motion.lens)
+                if i == 0 {
+                    Draw.draw(Draw.carvedBackground(bounds, hole: hole.rect, holeRadius: hole.radius, excluding: panes))
+                }
+                if hole.rect.contains(p) { continue }
+                if hole.rect.insetBy(dx: -bezel, dy: -bezel).intersects(p),
+                   let carved = Draw.carvedGlassArea(p, hole: hole.rect, holeRadius: hole.radius, color: color,
+                                                     fillOpacity: fill) {
+                    Draw.draw([carved])
                     continue
                 }
-                Draw.glassArea(p, selected: moving ? .zero : panes[selected], color: color, fillOpacity: fill,
+                if i == selected { continue }
+                Draw.glassArea(p, selected: motion.isSettled ? panes[selected] : .zero, color: color, fillOpacity: fill,
                                edge: Draw.glassAreaEdge(p, color: color, fillOpacity: fill))
             }
         }
         Draw.glassRing(blob, color: Config.scrollBorderColor, band: band, stretch: motion.stretch, lens: motion.lens,
-                       moving: !motion.isSettled)
+                       moving: !motion.isSettled, shadow: motion.activity)
         for (i, p) in panes.enumerated() {
             Draw.pill("\(i + 1)", typedCount: i == selected ? 0 : 1, center: CGPoint(x: p.minX + 14, y: p.minY + 12),
                       within: bounds)

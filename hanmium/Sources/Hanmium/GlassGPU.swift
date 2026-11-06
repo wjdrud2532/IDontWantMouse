@@ -55,7 +55,8 @@ final class GlassGPU {
     }
 
     /// 라벨 여러 개를 한 번에 그린다. rects 는 사진 픽셀 좌표. 결과는 rects 와 같은 순서.
-    func renderPills(_ rects: [(rect: CGRect, forceDark: Bool)], from source: MTLTexture) -> [LiquidGlass.Look?] {
+    func renderPills(_ rects: [(rect: CGRect, forceDark: Bool)], from source: MTLTexture,
+                     space: CGColorSpace) -> [LiquidGlass.Look?] {
         guard !rects.isEmpty else { return [] }
         let refraction = Float(Config.glassRefraction), blurAmount = Float(Config.glassBlur)
         let tint = Float(Config.glassTint), specular = Float(Config.glassSpecular)
@@ -116,7 +117,7 @@ final class GlassGPU {
         cmd.commit()
         cmd.waitUntilCompleted()
 
-        guard let image = Self.readImage(atlas, width: atlasWidth, height: atlasHeight) else { return rects.map { _ in nil } }
+        guard let image = Self.readImage(atlas, width: atlasWidth, height: atlasHeight, space: space) else { return rects.map { _ in nil } }
         let lum = lumBuffer.contents().bindMemory(to: Float.self, capacity: jobs.count)
         return places.enumerated().map { i, place in
             image.cropping(to: place).map { LiquidGlass.Look(image: $0, dark: rects[i].forceDark || lum[i] < 0.55) }
@@ -138,7 +139,7 @@ final class GlassGPU {
     func renderEdge(frameOrigin: CGPoint, size: (Int, Int), half: CGSize, radius: CGFloat, bezel: CGFloat, ring: Bool,
                     tint: (CGFloat, CGFloat, CGFloat), tintAlpha: CGFloat, saturation: CGFloat, specular: CGFloat,
                     fill: CGFloat, thickness: CGFloat, power: CGFloat, rim: CGFloat = 0, dome: Bool = false,
-                    from source: MTLTexture) -> CGImage? {
+                    from source: MTLTexture, space: CGColorSpace) -> CGImage? {
         let (w, h) = size
         var job = EdgeJob(originX: Float(frameOrigin.x), originY: Float(frameOrigin.y), width: Float(w), height: Float(h),
                           halfX: Float(half.width), halfY: Float(half.height), radius: Float(radius), bezel: Float(bezel),
@@ -159,12 +160,12 @@ final class GlassGPU {
         enc.endEncoding()
         cmd.commit()
         cmd.waitUntilCompleted()
-        return Self.readImage(out, width: w, height: h)
+        return Self.readImage(out, width: w, height: h, space: space)
     }
 
     // MARK: 움직이는 테두리 모양을 뺀 유리판
 
-    /// 셰이더의 Hole 과 같은 배치(float 24개)
+    /// 셰이더의 Hole 과 같은 배치(float 32개)
     struct HoleJob {
         var paneX: Float, paneY: Float, paneW: Float, paneH: Float
         var paneRadius: Float, holeCX: Float, holeCY: Float, holeHX: Float
@@ -173,36 +174,82 @@ final class GlassGPU {
         var tintR: Float, tintG: Float, tintB: Float, specular: Float
         /// dome 이면 thickness 는 영역 전체 볼록렌즈 두께이고, hole 가장자리는 holeBezel·holeThickness 띠로 따로 휜다
         var rim: Float = 0, dome: Float = 0, holeBezel: Float = 0, holeThickness: Float = 0
+        /// 판 안에서 그릴 부분(판 왼쪽 위 기준). 0 이면 판 전체.
+        var outX: Float = 0, outY: Float = 0, outW: Float = 0, outH: Float = 0
+        /// 비워 둘 둥근 사각형 수(renderHole 의 cuts)와 그 모서리 반지름. 나머지 둘은 자리 맞춤.
+        var cutCount: Float = 0, cutRadius: Float = 0, pad0: Float = 0, pad1: Float = 0
     }
 
     /// 둥근 사각형(영역)에서 둥근 사각형(hole)을 뺀 모양의 유리판을 그린다. 값은 모두 사진 픽셀 기준이고 hole 은
     /// 영역 왼쪽 위 기준. 띠 안쪽은 굴절 없이 옅은 색(tintAlpha)만 칠해서 한 장에 담는다.
-    func renderHole(_ job: HoleJob, from source: MTLTexture) -> CGImage? {
-        let w = Int(job.paneW), h = Int(job.paneH)
-        var job = job
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false)
-        desc.usage = .shaderWrite
-        desc.storageMode = .shared
-        guard w > 4, h > 4, let out = device.makeTexture(descriptor: desc), let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeComputeCommandEncoder() else { return nil }
-        enc.setComputePipelineState(hole)
-        enc.setTexture(source, index: 0)
-        enc.setTexture(out, index: 1)
-        enc.setBytes(&job, length: MemoryLayout<HoleJob>.stride, index: 0)
-        enc.dispatchThreads(MTLSize(width: w, height: h, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
-        enc.endEncoding()
+    /// 판에서 outX·Y·W·H 부분만 그린 장을 jobs 마다 하나씩, 한 번에 맡기고 한 번만 기다린다(화면 전체 판에서
+    /// 움직이는 테두리 둘레 네 줄). cuts(판 기준 x, y, 너비, 높이, 모서리 cutRadius)는 비워 둔다(그 위에 다른 유리판을 그린다).
+    func renderHole(_ jobs: [HoleJob], cuts: [SIMD4<Float>] = [], from source: MTLTexture,
+                    space: CGColorSpace) -> [CGImage?] {
+        guard let cmd = queue.makeCommandBuffer() else { return jobs.map { _ in nil } }
+        var cutData = cuts.isEmpty ? [SIMD4<Float>(repeating: 0)] : cuts
+        var outs: [(buffer: MTLBuffer, width: Int, height: Int, bytesPerRow: Int)?] = []
+        for var job in jobs {
+            if job.outW <= 0 || job.outH <= 0 { (job.outX, job.outY, job.outW, job.outH) = (0, 0, job.paneW, job.paneH) }
+            job.cutCount = Float(cuts.count)
+            let w = Int(job.outW), h = Int(job.outH)
+            // 줄 단위로 놓인 버퍼에 바로 써서, 읽을 때 GPU 배치를 푸는 복사 없이 그대로 사진으로 쓴다
+            // (큰 테두리 둘레 네 줄에서 1.5ms 걸리던 읽기가 사라진다)
+            let align = device.minimumLinearTextureAlignment(for: .rgba8Unorm)
+            let bytesPerRow = (w * 4 + align - 1) / align * align
+            let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: max(w, 1),
+                                                                height: max(h, 1), mipmapped: false)
+            desc.usage = .shaderWrite
+            desc.storageMode = .shared
+            guard w > 0, h > 0, let buffer = device.makeBuffer(length: bytesPerRow * h, options: .storageModeShared),
+                  let out = buffer.makeTexture(descriptor: desc, offset: 0, bytesPerRow: bytesPerRow),
+                  let enc = cmd.makeComputeCommandEncoder()
+            else { outs.append(nil); continue }
+            enc.setComputePipelineState(hole)
+            enc.setTexture(source, index: 0)
+            enc.setTexture(out, index: 1)
+            enc.setBytes(&job, length: MemoryLayout<HoleJob>.stride, index: 0)
+            enc.setBytes(&cutData, length: MemoryLayout<SIMD4<Float>>.stride * cutData.count, index: 1)
+            enc.dispatchThreads(MTLSize(width: w, height: h, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+            enc.endEncoding()
+            outs.append((buffer, w, h, bytesPerRow))
+        }
         cmd.commit()
         cmd.waitUntilCompleted()
-        return Self.readImage(out, width: w, height: h)
+        return outs.map {
+            $0.flatMap { Self.image(of: $0.buffer, width: $0.width, height: $0.height, bytesPerRow: $0.bytesPerRow, space: space) }
+        }
     }
 
-    private static func readImage(_ tex: MTLTexture, width: Int, height: Int) -> CGImage? {
+    /// 버퍼를 복사하지 않고 사진으로 감싼다. 사진이 남아 있는 동안 버퍼를 붙잡아 둔다.
+    /// space 는 화면 사진의 색 공간(ScreenSnapshot.colorSpace): 셰이더는 그 값을 그대로 옮기므로 같은 공간을 붙인다.
+    private static func image(of buffer: MTLBuffer, width: Int, height: Int, bytesPerRow: Int,
+                              space: CGColorSpace) -> CGImage? {
+        let owner = Unmanaged.passRetained(buffer as AnyObject).toOpaque()
+        guard let provider = CGDataProvider(dataInfo: owner, data: buffer.contents(), size: bytesPerRow * height,
+                                            releaseData: { info, _, _ in
+                                                info.map { Unmanaged<AnyObject>.fromOpaque($0).release() }
+                                            })
+        else {
+            Unmanaged<AnyObject>.fromOpaque(owner).release()
+            return nil
+        }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
+                       space: space,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
+
+    private static func readImage(_ tex: MTLTexture, width: Int, height: Int, space: CGColorSpace) -> CGImage? {
         guard width > 0, height > 0 else { return nil }
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        tex.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        var data = Data(count: width * height * 4)
+        data.withUnsafeMutableBytes {
+            tex.getBytes($0.baseAddress!, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                       space: space,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
@@ -227,6 +274,8 @@ final class GlassGPU {
         float power, smooth, tintAlpha, saturation;
         float tintR, tintG, tintB, specular;
         float rim, dome, holeBezel, holeThickness;
+        float outX, outY, outW, outH;
+        float cutCount, cutRadius, pad0, pad1;
     };
 
     struct Edge {
@@ -403,11 +452,18 @@ final class GlassGPU {
     // 고르지 않은 영역 유리판에서 움직이는 테두리 모양을 뺀다. 굴절·빛은 edgeGlass 의 판과 같은 식이고,
     // 바깥쪽 법선은 거리의 기울기로 구해서 영역 테두리든 움직이는 테두리든 같은 식으로 휜다.
     kernel void holeGlass(texture2d<float> src [[texture(0)]], texture2d<float, access::write> dst [[texture(1)]],
-                          constant Hole &g [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
-        if (gid.x >= uint(g.paneW) || gid.y >= uint(g.paneH)) return;
-        float2 px = float2(gid) + 0.5;
+                          constant Hole &g [[buffer(0)]], constant float4 *cuts [[buffer(1)]],
+                          uint2 gid [[thread_position_in_grid]]) {
+        if (gid.x >= uint(g.outW) || gid.y >= uint(g.outH)) return;
+        float2 px = float2(gid) + float2(g.outX, g.outY) + 0.5;
         float edge = -sdCarved(px, g);
         float coverage = clamp(edge + 0.5, 0.0, 1.0);
+        // 위에 다른 유리판을 그릴 자리는 비운다
+        for (uint i = 0; i < uint(g.cutCount); i++) {
+            float4 r = cuts[i];
+            float cr = min(g.cutRadius, min(r.z, r.w) * 0.5);
+            coverage *= clamp(sdRound(px, r.xy + r.zw * 0.5, max(r.zw * 0.5 - cr, 0.0), cr) + 0.5, 0.0, 1.0);
+        }
         if (coverage <= 0.0) { dst.write(float4(0.0), gid); return; }
         float3 tint = float3(g.tintR, g.tintG, g.tintB);
         // 띠 안쪽은 굴절 없이 옅은 색만 (살아 있는 화면 위에 색을 덮는 자리, Draw.glassArea 의 칠과 같다)

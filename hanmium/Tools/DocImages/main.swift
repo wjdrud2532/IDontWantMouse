@@ -214,7 +214,7 @@ do {
             drawBackground(bg, size)
             Draw.glassSource = source
             Draw.glassRing(motion.rect, color: Config.scrollBorderColor, band: Draw.ringBand(3), stretch: motion.stretch,
-                           lens: motion.lens, moving: !motion.isSettled)
+                           lens: motion.lens, moving: !motion.isSettled, shadow: motion.activity)
             Draw.glassSource = nil
         }) { images.append(img) }
     }

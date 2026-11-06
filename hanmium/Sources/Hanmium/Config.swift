@@ -155,6 +155,8 @@ enum Config {
     static var slabRefraction: CGFloat { factor("slabRefraction") }
     /// 고르지 않은 영역 유리판이 영역 전체에서 휘는지(볼록렌즈). 끄면 가장자리 slabBezel 폭 안에서만 휜다.
     static var slabFullRefraction: Bool { defaults.object(forKey: "slabFullRefraction") as? Bool ?? true }
+    /// 영역 유리판이 없는 곳(창의 나머지, 다른 창, 배경화면)도 테두리 둘레가 휘는지
+    static var backgroundRefraction: Bool { defaults.object(forKey: "backgroundRefraction") as? Bool ?? true }
     /// 고르지 않은 영역 유리판이 휘는 범위(영역 전체가 아닐 때): 가장자리에서 안쪽으로 몇 pt 까지
     static let defaultSlabBezel = 40.0
     static var slabBezel: CGFloat {
@@ -228,6 +230,7 @@ enum SettingsTransfer {
         "scrollKeys", "scrollPxPerMs", "dashMultiplier", "animationScale", "terminalNotchLines",
         "scrollBorderShown", "scrollBorderStyle", "scrollBorderWidth", "scrollBorderColor",
         "focusMotion", "focusMotionSpeed", "borderRefraction", "slabRefraction", "slabFullRefraction", "slabBezel",
+        "backgroundRefraction",
         "inactiveAreaShown", "inactiveAreaStyle", "inactiveAreaColor", "inactiveLineOpacity", "inactiveFillOpacity",
     ]
 

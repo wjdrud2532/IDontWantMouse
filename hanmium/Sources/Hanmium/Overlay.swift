@@ -358,7 +358,7 @@ enum Draw {
     }
 
     /// 바깥에만 그림자. 유리 속이 비치므로 안쪽까지 어둡게 하지 않는다. radius 가 없으면 알약.
-    private static func glassShadow(_ r: CGRect, radius: CGFloat? = nil, dark: Bool) {
+    private static func glassShadow(_ r: CGRect, radius: CGFloat? = nil, dark: Bool, strength: CGFloat = 1) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let corner = min(radius ?? r.height / 2, r.width / 2, r.height / 2)
         let shape = CGPath(roundedRect: r, cornerWidth: corner, cornerHeight: corner, transform: nil)
@@ -367,7 +367,7 @@ enum Draw {
         ctx.addPath(shape)
         ctx.clip(using: .evenOdd)
         ctx.setShadow(offset: CGSize(width: 0, height: -1.5), blur: 6,
-                      color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: dark ? 0.5 : 0.3))
+                      color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: (dark ? 0.5 : 0.3) * strength))
         ctx.addPath(shape)
         ctx.fillPath()
         ctx.restoreGState()
@@ -497,22 +497,75 @@ enum Draw {
         return lens > 0.5 ? (rect, radius) : (rect.insetBy(dx: -band, dy: -band), radius + band)
     }
 
-    /// 테두리가 움직이는 동안의 고르지 않은 영역 유리판: 영역에서 움직이는 테두리 모양(hole)을 뺀 유리를 지금 화면으로
-    /// 새로 굴절시켜 그린다. 테두리가 빠져나간 자리에는 그 모양대로 유리가 차오르고, 들어가는 영역은 그 모양대로 파인다.
-    /// GPU 를 못 쓰거나 화면 사진이 없으면 false (그때는 glassArea 로 그린다).
+    /// 테두리 가까이에 있는 고르지 않은 영역 유리판: 영역에서 테두리 모양(hole)을 뺀 유리를 지금 화면으로 굴절시킨다.
+    /// 테두리가 빠져나간 자리에는 그 모양대로 유리가 차오르고, 들어가는 영역은 그 모양대로 파이며, 멈춘 뒤에도
+    /// 테두리 둘레는 휜 채로 남는다. GPU 를 못 쓰거나 화면 사진이 없으면 nil (그때는 glassArea 로 그린다).
     static func carvedGlassArea(_ rect: CGRect, hole: CGRect, holeRadius: CGFloat, color: NSColor,
-                                fillOpacity: CGFloat) -> Bool {
-        guard collecting == nil else { return true }
+                                fillOpacity: CGFloat) -> (frame: CGRect, image: CGImage)? {
+        guard collecting == nil else { return nil }
         let glass = slabGlass(for: rect)
         guard let image = glassSource?.carvedSlab(rect, cornerRadius: areaCornerRadius, hole: hole, holeRadius: holeRadius,
                                                   bezel: glass.bezel, thickness: glass.thickness, power: glass.power,
-                                                  rim: glass.rim, dome: glass.dome, holeBezel: min(40, glass.bezel),
-                                                  holeThickness: min(40, glass.bezel) * 0.6 * Config.slabRefraction,
-                                                  tint: color, tintAlpha: fillOpacity, specular: 0.6)
-        else { return false }
-        NSImage(cgImage: image, size: rect.size).draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
-                                                     respectFlipped: true, hints: nil)
-        return true
+                                                  rim: glass.rim, dome: glass.dome, holeBezel: min(holeBand, glass.bezel),
+                                                  holeThickness: min(holeBand, glass.bezel) * 0.6 * Config.slabRefraction,
+                                                  tint: color, tintAlpha: fillOpacity, specular: 0.6).first ?? nil
+        else { return nil }
+        return (rect, image)
+    }
+
+    /// 미리 그려 둔 유리 조각들을 제자리에
+    static func draw(_ pieces: [(frame: CGRect, image: CGImage)]) {
+        for piece in pieces {
+            NSImage(cgImage: piece.image, size: piece.frame.size).draw(
+                in: piece.frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+    }
+
+    /// 테두리 둘레가 휘는 폭: 영역 전체 굴절이면 40pt, 아니면 굴절 범위 설정까지
+    static var holeBand: CGFloat { Config.slabFullRefraction && GlassGPU.shared != nil ? 40 : min(40, Config.slabBezel) }
+
+    /// 영역 유리판이 없는 곳(창의 나머지, 다른 창, 배경화면)도 투명한 유리판을 테두리가 파고 지나가듯
+    /// 테두리 둘레 띠(holeBand)만큼 휜다. 띠의 세기는 영역 유리판의 테두리 둘레와 같다. 색을 덮지 않고 채도도
+    /// 그대로, 빛도 넣지 않아서(넣으면 테두리 바깥에 흰 막이 떠 보였다) 휘는 것 말고는 살아 있는 화면과 같다.
+    /// 판은 화면보다 넓게 잡아 화면 가장자리는 휘지 않는다.
+    /// 영역 유리판(slabs) 자리는 빼고, 띠가 생길 수 있는 테두리 둘레 네 줄만 GPU 로 그린다(hole 안쪽은 비어 있다).
+    static func carvedBackground(_ screen: CGRect, hole: CGRect, holeRadius: CGFloat,
+                                 excluding slabs: [CGRect]) -> [(frame: CGRect, image: CGImage)] {
+        guard collecting == nil, let glassSource else { return [] }
+        let band = holeBand, s = glassSource.snapshot.scale
+        // 띠 이음매가 보이지 않게 화면 픽셀에 맞춘다
+        let align = { (r: CGRect, outward: Bool) -> CGRect in
+            guard !r.isNull else { return .null }
+            let lo = { (v: CGFloat) in (v * s).rounded(outward ? .down : .up) / s }
+            let hi = { (v: CGFloat) in (v * s).rounded(outward ? .up : .down) / s }
+            let x0 = lo(r.minX), y0 = lo(r.minY), x1 = hi(r.maxX), y1 = hi(r.maxY)
+            return x1 > x0 && y1 > y0 ? CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0) : .null
+        }
+        let outer = align(hole.insetBy(dx: -band - 1, dy: -band - 1), true).intersection(screen)
+        guard !outer.isNull, outer.width > 0, outer.height > 0 else { return [] }
+        // 둥근 hole 안에 들어가는 사각형(모서리 반지름 r 이면 0.3r 안쪽)은 비어 있어서 그리지 않는다
+        let r = min(holeRadius, hole.width / 2, hole.height / 2)
+        let inner = align(hole.insetBy(dx: r * 0.3 + 1, dy: r * 0.3 + 1), false).intersection(outer)
+        var parts = [outer]
+        if !inner.isNull, inner.width > 0, inner.height > 0 {
+            parts = [CGRect(x: outer.minX, y: outer.minY, width: outer.width, height: inner.minY - outer.minY),
+                     CGRect(x: outer.minX, y: inner.maxY, width: outer.width, height: outer.maxY - inner.maxY),
+                     CGRect(x: outer.minX, y: inner.minY, width: inner.minX - outer.minX, height: inner.height),
+                     CGRect(x: inner.maxX, y: inner.minY, width: outer.maxX - inner.maxX, height: inner.height)]
+        }
+        let covered = { (part: CGRect) in
+            slabs.contains { $0.insetBy(dx: areaCornerRadius, dy: areaCornerRadius).contains(part) }
+        }
+        parts = parts.filter { $0.width > 0 && $0.height > 0 && !covered($0) }
+        guard !parts.isEmpty else { return [] }
+        // 영역 유리판 자리는 GPU 에서 비운다(CG 로 잘라 내면 큰 테두리에서 4ms 더 걸렸다)
+        let pane = screen.insetBy(dx: -band - 30, dy: -band - 30)
+        let images = glassSource.carvedSlab(pane, cornerRadius: 0, hole: hole, holeRadius: holeRadius, bezel: band,
+                                            thickness: band * 0.6 * Config.slabRefraction, power: 3, rim: min(24, band),
+                                            tint: .black, tintAlpha: 0, saturation: 1, specular: 0, parts: parts,
+                                            cuts: Array(slabs.filter { $0.intersects(outer) }.prefix(64)),
+                                            cutRadius: areaCornerRadius)
+        return zip(parts, images).compactMap { part, image in image.map { (part, $0) } }
     }
 
     /// 고르지 않은 영역을 유리판으로: 살아 있는 화면 위에 옅은 색을 덮고, 가장자리 띠(edge)는 굴절 + 빛.
@@ -545,14 +598,18 @@ enum Draw {
     }
 
     /// 고른 영역 둘레 바깥을 유리 막대로 감싼다. 물방울 이동 중이면 stretch·lens 로 모양이 바뀌고,
-    /// 매 프레임 모양이 달라서 캐시하지 않는다(moving).
+    /// 매 프레임 모양이 달라서 캐시하지 않는다(moving). 바깥 그림자는 움직이는 정도(shadow, DropletMotion.activity)만큼
+    /// 진해서 멈출 때 서서히 사라진다(멈추는 순간 지우면 둘레가 뚝 밝아졌다).
     static func glassRing(_ rect: CGRect, color: NSColor, band baseBand: CGFloat, stretch: CGFloat = 0,
-                          lens: CGFloat = 0, moving: Bool = false) {
+                          lens: CGFloat = 0, moving: Bool = false, shadow: CGFloat = 0) {
         guard collecting == nil else { return }
         let radius = blobRadius(rect, stretch: stretch, lens: lens)
         let band = baseBand * (1 + 0.4 * stretch)
         let outer = rect.insetBy(dx: -band, dy: -band)
-        if moving { glassShadow(lens > 0.5 ? rect : outer, radius: lens > 0.5 ? radius : radius + band, dark: true) }
+        if shadow > 0.01 {
+            glassShadow(lens > 0.5 ? rect : outer, radius: lens > 0.5 ? radius : radius + band, dark: true,
+                        strength: shadow)
+        }
         if lens < 1 {
             // 두께 = 막대 굵기의 절반 × 굴절 강도 설정(100% 면 예전과 같다)
             if let edge = glassSource?.edge(rect, ring: true, width: band, cornerRadius: radius, tint: color,
