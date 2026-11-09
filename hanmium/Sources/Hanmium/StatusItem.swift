@@ -22,18 +22,40 @@ final class StatusItem: NSObject, NSMenuDelegate {
 
     override init() {
         super.init()
-        if let button = item.button {
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-            let image = NSImage(systemSymbolName: "keyboard.fill", accessibilityDescription: "Hanmium")?
-                .withSymbolConfiguration(config)
-            image?.isTemplate = true
-            button.image = image
-        }
+        item.button?.image = Self.icon
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
         refreshButton()
     }
+
+    /// 앱 아이콘의 노란 라벨을 옮긴 "jk" 알약. 템플릿이라 메뉴 막대 색을 따르고, 글자는 알약을 뚫어서 그린다.
+    private static let icon: NSImage = {
+        let image = NSImage(size: NSSize(width: 20, height: 18), flipped: false) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let pill = CGRect(x: 0.5, y: 2.5, width: 19, height: 13)
+            ctx.setFillColor(.black)
+            ctx.addPath(CGPath(roundedRect: pill, cornerWidth: 4, cornerHeight: 4, transform: nil))
+            ctx.fillPath()
+            let base = NSFont.systemFont(ofSize: 11.5, weight: .heavy)
+            let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 11.5) } ?? base
+            let text = NSAttributedString(string: "jk", attributes: [
+                .font: font,
+                NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+            ])
+            let line = CTLineCreateWithAttributedString(text)
+            // j 의 아래 꼬리까지 넣은 글자 모양 기준으로 알약 가운데에 둔다
+            let glyphs = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+            ctx.setBlendMode(.destinationOut)
+            ctx.textMatrix = .identity
+            ctx.textPosition = CGPoint(x: pill.midX - glyphs.midX, y: pill.midY - glyphs.midY)
+            CTLineDraw(line, ctx)
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Hanmium"
+        return image
+    }()
 
     /// 메뉴 막대 메뉴가 열려도 앞 앱은 그대로라서, 이 앱이 '지금 쓰던 앱'이다. Hanmium 자신(설정 창)은 뺀다.
     private var frontmostOther: NSRunningApplication? {
