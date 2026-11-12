@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {"description": "마우스 모드 토글", "manipulators": [
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "keypad_num_lock", "modifiers": {"mandatory": ["shift"], "optional": ["any"]}},
+       "to": [{"set_variable": {"name": "mouse_mode", "value": 0}}]},
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_unless", "value": 1}],
+       "from": {"key_code": "keypad_num_lock", "modifiers": {"mandatory": ["shift"], "optional": ["any"]}},
+       "to": [{"set_variable": {"name": "mouse_mode", "value": 1}}]}]},
+    {"description": "마우스 모드: 숫자패드", "manipulators": [
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "keypad_8", "modifiers": {"optional": ["any"]}}, "to": [{"mouse_key": {"y": -1536}}]},
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "keypad_5", "modifiers": {"optional": ["any"]}}, "to": [{"pointing_button": "button1"}]},
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "keypad_7", "modifiers": {"optional": ["any"]}}, "to": [{"key_code": "home"}]},
+      {"type": "basic", "conditions": [{"name": "mouse_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "keypad_9", "modifiers": {"optional": ["any"]}}, "to": [{"mouse_key": {"vertical_wheel": -48}}]}]},
+    {"description": "₩ + Space + hjkl", "manipulators": [
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "spacebar", "modifiers": {"optional": ["any"]}},
+       "to": [{"set_variable": {"name": "word_mode", "value": 1}}],
+       "to_after_key_up": [{"set_variable": {"name": "word_mode", "value": 0}}],
+       "to_if_alone": [{"key_code": "spacebar"}]},
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}, {"name": "word_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "h", "modifiers": {"mandatory": ["left_shift"], "optional": ["any"]}},
+       "to": [{"key_code": "left_arrow", "modifiers": ["left_option", "left_shift", "right_shift"]}]},
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}, {"name": "word_mode", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "h", "modifiers": {"optional": ["any"]}},
+       "to": [{"key_code": "left_arrow", "modifiers": ["left_option"]}]}]},
+    {"description": "₩ + hjkl", "manipulators": [
+      {"type": "basic", "from": {"key_code": "grave_accent_and_tilde", "modifiers": {"optional": ["any"]}},
+       "parameters": {"basic.to_if_alone_timeout_milliseconds": 1000},
+       "to": [{"set_variable": {"name": "nav_held", "value": 1}}],
+       "to_after_key_up": [{"set_variable": {"name": "nav_held", "value": 0}}],
+       "to_if_alone": [{"key_code": "grave_accent_and_tilde"}]},
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "h", "modifiers": {"mandatory": ["option"], "optional": ["any"]}},
+       "to": [{"pointing_button": "button1"}]},
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "h", "modifiers": {"optional": ["any"]}}, "to": [{"key_code": "left_arrow"}]}]},
+    {"description": "Tab → 라벨 / ₩ + Tab → Tab", "manipulators": [
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_if", "value": 1}],
+       "from": {"key_code": "tab", "modifiers": {"optional": ["any"]}}, "to": [{"key_code": "tab"}]},
+      {"type": "basic", "conditions": [{"name": "nav_held", "type": "variable_unless", "value": 1}],
+       "from": {"key_code": "tab", "modifiers": {"optional": ["caps_lock"]}}, "to": [{"hanmium": "labels"}]}]},
+    {"description": "Opt + hjkl → 포인터", "manipulators": [
+      {"type": "basic", "from": {"key_code": "h", "modifiers": {"mandatory": ["option"], "optional": ["caps_lock"]}},
+       "to": [{"mouse_key": {"x": -1536}}]}]},
+    {"description": "지원 안 하는 조작은 건너뜀", "manipulators": [
+      {"type": "basic", "from": {"simultaneous": [{"key_code": "a"}, {"key_code": "s"}]}, "to": [{"key_code": "escape"}]}]}
+  ],
+  "simple_modifications": [{"from": {"key_code": "f13"}, "to": [{"key_code": "escape"}]}]
+}

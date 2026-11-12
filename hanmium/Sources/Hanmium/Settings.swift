@@ -3,16 +3,19 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 메뉴 막대 아이콘 → 설정… 으로 여는 창.
+/// 메뉴 막대 아이콘 → 설정 열기 로 여는 창. Karabiner-Elements 설정 창처럼 왼쪽 목록에서 화면을 고른다.
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let onHotkeysChanged: () -> Void
     private let onRecording: (Bool) -> Void
+    private let onCheckApp: (NSRunningApplication) -> Void
 
     /// onRecording: 단축키를 녹화하는 동안 true. 그동안 기존 단축키가 가로채지 않게 풀어둬야 한다.
-    init(onHotkeysChanged: @escaping () -> Void, onRecording: @escaping (Bool) -> Void) {
+    init(onHotkeysChanged: @escaping () -> Void, onRecording: @escaping (Bool) -> Void,
+         onCheckApp: @escaping (NSRunningApplication) -> Void) {
         self.onHotkeysChanged = onHotkeysChanged
         self.onRecording = onRecording
+        self.onCheckApp = onCheckApp
     }
 
     func show() {
@@ -20,15 +23,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Config.defaults.set(SMAppService.mainApp.status == .enabled, forKey: "launchAtLogin")
         if window == nil {
             let hosting = NSHostingController(
-                rootView: SettingsView(onHotkeysChanged: onHotkeysChanged, onRecording: onRecording))
+                rootView: SettingsView(onHotkeysChanged: onHotkeysChanged, onRecording: onRecording,
+                                       onCheckApp: onCheckApp))
+            // 창 크기는 사용자가 정한다(SwiftUI 가 내용 크기로 창을 줄이거나 늘리지 않게)
+            hosting.sizingOptions = []
             let w = NSWindow(contentViewController: hosting)
             w.title = "Hanmium 설정"
-            w.styleMask = [.titled, .closable]
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             w.isReleasedWhenClosed = false
             w.delegate = self
-            // 내용이 길어서 작은 화면에서도 넘치지 않게 높이를 정하고(안은 스크롤된다) 그 크기로 가운데 둔다
-            w.setContentSize(NSSize(width: 460, height: 620))
+            w.contentMinSize = NSSize(width: 780, height: 520)
+            w.setContentSize(NSSize(width: 920, height: 680))
             w.center()
+            w.setFrameAutosaveName("HanmiumSettings")
             window = w
         }
         // 메뉴 막대 앱(.accessory)은 창을 클릭해도 활성 앱이 되지 않아 키 입력(단축키 녹화)을 못 받는다.
@@ -68,6 +75,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 struct SettingsView: View {
     let onHotkeysChanged: () -> Void
     let onRecording: (Bool) -> Void
+    var onCheckApp: (NSRunningApplication) -> Void = { _ in }
     /// 창 높이. 문서 이미지를 만들 때(Tools/DocImages)만 늘려서 모든 항목을 한 장에 담는다.
     static var height: CGFloat = 620
 
@@ -150,9 +158,25 @@ struct SettingsView: View {
     /// 로그인 항목 등록은 .app 번들로 실행했을 때만 된다
     private static let isAppBundle = Bundle.main.bundleURL.pathExtension == "app"
 
-    /// 설정 창 탭: 일반(켜기·앱별 사용·설정 파일), 라벨(라벨·검색 모드), 스크롤(스크롤 모드)
+    /// 설정 창 화면: 일반(켜기·앱별 사용·점검·설정 파일), 라벨(라벨·검색 모드), 스크롤(스크롤 모드),
+    /// 키보드(규칙·단순 바꾸기·매개변수: Karabiner-Elements 와 같은 방식)
     enum Tab: String, CaseIterable {
         case general = "일반", labels = "라벨", scroll = "스크롤"
+        case keyRules = "키보드 규칙", keySimple = "단순 바꾸기", keyParams = "키보드 매개변수"
+
+        static let hanmium: [Tab] = [.general, .labels, .scroll]
+        static let keyboard: [Tab] = [.keyRules, .keySimple, .keyParams]
+
+        var icon: String {
+            switch self {
+            case .general: "gearshape"
+            case .labels: "character.cursor.ibeam"
+            case .scroll: "scroll"
+            case .keyRules: "list.bullet.rectangle"
+            case .keySimple: "arrow.left.arrow.right"
+            case .keyParams: "slider.horizontal.3"
+            }
+        }
     }
     @AppStorage("settingsTab", store: Config.defaults) private var tab = Tab.general.rawValue
     /// 문서 이미지를 만들 때(Tools/DocImages) 탭마다 그리려고 정한다
@@ -160,24 +184,28 @@ struct SettingsView: View {
     private var currentTab: Tab { Self.forcedTab ?? Tab(rawValue: tab) ?? .general }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: Binding(get: { currentTab.rawValue }, set: { tab = $0 })) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .padding(.top, 12)
-            Form {
-                switch currentTab {
-                case .general: generalTab
-                case .labels: labelsTab
-                case .scroll: scrollTab
+        Group {
+            if let forced = Self.forcedTab {
+                // 문서 이미지(Tools/DocImages): 화면 하나만 좁고 길게
+                page(forced).frame(width: 460, height: Self.height)
+            } else {
+                HStack(spacing: 0) {
+                    List(selection: Binding<String?>(get: { currentTab.rawValue }, set: { if let v = $0 { tab = v } })) {
+                        Section("Hanmium") {
+                            ForEach(Tab.hanmium, id: \.self) { t in Label(t.rawValue, systemImage: t.icon).tag(t.rawValue) }
+                        }
+                        Section("키보드") {
+                            ForEach(Tab.keyboard, id: \.self) { t in Label(t.rawValue, systemImage: t.icon).tag(t.rawValue) }
+                        }
+                    }
+                    .listStyle(.sidebar)
+                    .frame(width: 190)
+                    Divider()
+                    page(currentTab).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(minWidth: 780, minHeight: 520)
             }
-            .formStyle(.grouped)
         }
-        .frame(width: 460, height: Self.height)
         .onChange(of: enabled) { _ in onHotkeysChanged() }
         .onChange(of: labelsOn) { _ in onHotkeysChanged() }
         .onChange(of: searchOn) { _ in onHotkeysChanged() }
@@ -188,6 +216,24 @@ struct SettingsView: View {
         .onChange(of: launchAtLogin, perform: setLaunchAtLogin)
         .onChange(of: appFilterMode) { _ in onHotkeysChanged() }
         .onChange(of: appList) { _ in onHotkeysChanged() }
+    }
+
+    @ViewBuilder private func page(_ t: Tab) -> some View {
+        switch t {
+        case .general: Form { generalTab }.formStyle(.grouped)
+        case .labels: Form { labelsTab }.formStyle(.grouped)
+        case .scroll: Form { scrollTab }.formStyle(.grouped)
+        case .keyRules: KeyboardRulesView()
+        case .keySimple: KeyboardSimpleView()
+        case .keyParams: KeyboardParamsView()
+        }
+    }
+
+    /// 앱별 사용·점검에서 고를 실행 중인 앱
+    private var runningApps: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.processIdentifier != getpid() }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
     }
 
     // MARK: 일반
@@ -225,12 +271,31 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Button("앱 추가…", action: addApps)
+            HStack {
+                Button("앱 추가…", action: addApps)
+                Menu("실행 중인 앱에서 추가") {
+                    ForEach(runningApps.filter { !listedIDs.contains($0.bundleIdentifier ?? "") }, id: \.processIdentifier) { app in
+                        Button(app.localizedName ?? app.bundleIdentifier ?? "?") {
+                            appList = (listedIDs + [app.bundleIdentifier ?? ""]).joined(separator: "\n")
+                        }
+                    }
+                }
+                .fixedSize()
+            }
             note((includeMode
                 ? "목록의 앱이 앞에 있을 때만 단축키가 동작하고, 다른 앱에서는 키가 그 앱으로 그대로 갑니다. "
                     + "목록이 비어 있으면 어디서도 동작하지 않습니다. "
                 : "목록의 앱이 앞에 있으면 Hanmium 단축키가 꺼지고 키가 그 앱으로 그대로 갑니다. ")
-                + "메뉴 막대 아이콘에서 지금 쓰는 앱을 바로 넣거나 뺄 수도 있습니다.")
+                + "실행 중인 앱은 바로 고를 수 있습니다.")
+        }
+        Section("앱 점검") {
+            Menu("점검할 앱 고르기") {
+                ForEach(runningApps, id: \.processIdentifier) { app in
+                    Button(app.localizedName ?? app.bundleIdentifier ?? "?") { onCheckApp(app) }
+                }
+            }
+            .fixedSize()
+            note("그 앱에서 Hanmium 이 클릭 대상·스크롤 영역을 제대로 찾는지 확인해 결과를 보여 줍니다(Hanmium --check 와 같음).")
         }
         Section("설정 파일") {
             HStack {

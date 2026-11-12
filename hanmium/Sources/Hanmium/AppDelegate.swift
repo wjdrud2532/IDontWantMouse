@@ -46,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onHotkeysChanged: { [weak self] in self?.reloadHotkeys() },
         onRecording: { [weak self] recording in
             if recording { HotKeys.shared.unregisterAll() } else { self?.reloadHotkeys() }
-        })
+        },
+        onCheckApp: { [weak self] app in self?.check(app) })
 
     private let openSettings: Bool
 
@@ -73,19 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if GlassSnapshots.usesGlass, !GlassSnapshots.captureAllowed { CGRequestScreenCaptureAccess() }
 
         let status = StatusItem()
-        status.onToggleEnabled = { [weak self] in
-            Config.enabled.toggle()
-            self?.reloadHotkeys()
-        }
         status.onOpenSettings = { [weak self] in self?.settings.show() }
-        status.onToggleListed = { [weak self] bundleID in
-            var apps = Config.appList
-            if let i = apps.firstIndex(of: bundleID) { apps.remove(at: i) } else { apps.append(bundleID) }
-            Config.appList = apps
-            self?.reloadHotkeys()
-        }
-        status.onCheckApp = { [weak self] app in self?.check(app) }
         statusItem = status
+        // 키보드 규칙(Karabiner 형식): {"hanmium": …} 는 단축키처럼 모드를 연다
+        KeyboardTap.shared.onHanmium = { [weak self] action in
+            self?.toggle(action == "search" ? .search : action == "scroll" ? .scroll : .labels)
+        }
+        KeyboardStore.shared.load()
         reloadHotkeys()
         if openSettings { settings.show() }
         watchTrustUntilGranted()
@@ -312,6 +307,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !building { endHandoff() }  // 열지 못했다
             }
         }
+        mode.onScrollNumber = { [weak self, weak mode] n in
+            // 번호는 미리 찾은 영역이 있을 때만 그려지므로 그것으로 띄우고, 그 번호로 옮긴다
+            guard let self, let mode, let ready = readyScroll() else { return NSSound.beep() }
+            Timing.begin("스크롤 모드 [\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")] (라벨에서 \(n)번)")
+            heldKey = nil
+            open(.scroll, timed: false, ready: ready)
+            (current as? ScrollMode)?.choose(number: n)
+            replace(mode)
+        }
         install(mode, kind)
     }
 
@@ -328,6 +332,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard token == self.openToken, self.currentKind == .labels, !snapshot.areas.isEmpty else { return }
                 self.prewarmed = (token, windowID, snapshot)
+                // 스크롤 영역에 번호를 붙여 라벨에서 바로 고르게 한다(스크롤 모드의 숫자와 같은 번호)
+                (self.current as? ClickMode)?.showScrollNumbers(
+                    ScrollMode.numberSpots(windows: snapshot.windows, areas: snapshot.areas))
             }
         }
     }
@@ -373,6 +380,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             open(.labels)
         }
         mode.onPassThrough = { [weak self] event in self?.passThrough(event) }
+        mode.onHistory = { [weak self] back in self?.goHistory(back: back) }
+        mode.onTab = { [weak self] previous in
+            // 앞·뒤 탭: ⌘⇧[ ⌘⇧] (브라우저·VS Code·Finder·터미널 대부분이 받는다). 옮긴 탭에 스크롤 모드를 다시 연다.
+            Log.write("\(previous ? "앞" : "뒤") 탭 [\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")]")
+            self?.passThrough(key: previous ? 33 : 30, flags: [.maskCommand, .maskShift])
+        }
         mode.onStale = { [weak self] in self?.reopenScroll(after: 0.05) }
         scrollSession = true
         install(mode, .scroll)
@@ -390,19 +403,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 스크롤 모드에서 누른 ⌘·⌃ 단축키(탭 바꾸기 등): 스크롤 모드를 닫아 키 포커스를 앱에 돌려준 뒤 같은 키를 보내고,
     /// 조금 뒤 그 자리에 스크롤 모드를 다시 연다. ⌘T·⌘L 처럼 입력칸으로 갔으면 글을 쓰려는 것이라 끝낸다.
     private func passThrough(_ event: NSEvent) {
+        let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.intersection([.command, .control, .option, .shift]).rawValue))
+        passThrough(key: event.keyCode, flags: flags)
+    }
+
+    /// 스크롤 모드의 Shift+h·l: 앱의 뒤로·앞으로 단축키를 넘기고 바뀐 화면에 스크롤 모드를 다시 연다
+    private func goHistory(back: Bool) {
+        let app = NSWorkspace.shared.frontmostApplication
+        guard let keys = HistoryKeys.keys(for: app?.bundleIdentifier) else {
+            NSSound.beep()  // 터미널처럼 뒤로·앞으로가 없는 앱
+            return
+        }
+        Log.write("\(back ? "뒤로" : "앞으로") [\(app?.bundleIdentifier ?? "?")]")
+        let key = back ? keys.back : keys.forward
+        passThrough(key: key.code, flags: key.flags, afterShiftUp: true)
+    }
+
+    /// afterShiftUp: 누른 Shift 를 뗀 뒤에 보낸다(Shift+h·l). 아직 누르고 있으면 앱이 ⌘[ 를 ⌘⇧[(앞 탭)처럼,
+    /// ⌃- 를 ⌃⇧-(앞으로)처럼 받을 수 있다. 0.6초 넘게 누르고 있으면 그냥 보낸다.
+    private func passThrough(key: UInt16, flags: CGEventFlags, afterShiftUp: Bool = false) {
         focusBefore = Self.focusedElement()
         replace(current)
-        let key = event.keyCode
-        let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.intersection([.command, .control, .option, .shift]).rawValue))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        func post(_ waited: Int) {
+            if afterShiftUp, waited < 30, CGEventSource.flagsState(.hidSystemState).contains(.maskShift) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { post(waited + 1) }
+                return
+            }
             for down in [true, false] {
                 let e = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down)
                 e?.flags = flags
                 e?.post(tap: .cghidEventTap)
             }
+            // 탭을 바꾸는 단축키(⌃Tab)·뒤로 가기는 화면이 바뀌는 데 시간이 조금 걸린다
+            reopenScroll(after: 0.15, unlessTyping: true)
         }
-        // 키는 0.05초 뒤에 보낸다. 탭을 바꾸는 단축키(⌃Tab)는 화면이 바뀌는 데 시간이 조금 걸린다.
-        reopenScroll(after: 0.2, unlessTyping: true)
+        // 스크롤 모드를 닫아 키 포커스가 앱으로 돌아간 뒤에 보낸다
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { post(0) }
     }
 
     /// 흐름 중이면 delay 뒤 앞 앱에 스크롤 모드를 다시 연다. 여러 번 불리면 마지막 것만.

@@ -89,6 +89,39 @@ final class HotKeys {
     }
 }
 
+// MARK: - 뒤로·앞으로
+
+/// 스크롤 모드의 Shift+h·l 로 앱에 보낼 뒤로·앞으로 단축키. 앱마다 다르다.
+/// 보통은 ⌘[ ⌘] (macOS '이동' 메뉴의 관례: 브라우저·Finder·Slack 등). VS Code 계열은 ⌃- ⌃⇧- (⌘[ 는 내어쓰기라 안 된다),
+/// Xcode 는 ⌃⌘← ⌃⌘→ (⌘[ 는 줄을 왼쪽으로 옮긴다). 터미널은 뒤로·앞으로가 없다(nil).
+enum HistoryKeys {
+    struct Key {
+        let code: UInt16
+        let flags: CGEventFlags
+    }
+
+    static func keys(for bundleID: String?) -> (back: Key, forward: Key)? {
+        let id = bundleID ?? ""
+        if terminals.contains(id) { return nil }
+        if vsCodeLike.contains(id) {
+            return (Key(code: 27, flags: .maskControl), Key(code: 27, flags: [.maskControl, .maskShift]))
+        }
+        if id == "com.apple.dt.Xcode" {
+            let arrow: CGEventFlags = [.maskControl, .maskCommand, .maskSecondaryFn, .maskNumericPad]
+            return (Key(code: 123, flags: arrow), Key(code: 124, flags: arrow))
+        }
+        return (Key(code: 33, flags: .maskCommand), Key(code: 30, flags: .maskCommand))
+    }
+
+    static let terminals: Set<String> = [
+        WezTerm.bundleID, "com.apple.Terminal", "com.googlecode.iterm2", "net.kovidgoyal.kitty", "com.mitchellh.ghostty",
+        "org.alacritty", "dev.warp.Warp-Stable",
+    ]
+    static let vsCodeLike: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium", "com.todesktop.230313mzl4w4u92",
+    ]
+}
+
 // MARK: - 키 코드 → 문자
 
 enum KeyTranslator {

@@ -4,6 +4,8 @@ import QuartzCore
 /// 스크롤 영역을 골라 키보드로 스크롤한다.
 ///
 /// h/j/k/l(설정 가능)·화살표: 누르고 있는 동안 부드럽게 스크롤, Shift 를 같이 누르면 빠르게(dash).
+/// 단, Shift+h·l(왼쪽·오른쪽 키)은 뒤로·앞으로(onHistory), Shift+j·k(아래·위 키)는 앞·뒤 탭(onTab).
+/// 화살표는 Shift 와 함께 그대로 빠르게.
 /// d/u: 반 페이지를 부드럽게, 누르고 있으면 빠르게 계속. gg/G: 맨 위/맨 아래.
 /// 1~9: 창이 여러 개면 그 번호의 창으로(같은 번호를 다시 누르면 그 창의 다음 영역),
 ///      창이 하나면 그 번호의 스크롤 영역으로.
@@ -17,6 +19,10 @@ final class ScrollMode: Mode {
     var onLabels: (() -> Void)?
     /// 스크롤 모드가 쓰지 않는 ⌘·⌃ 단축키를 눌렀을 때 (앱으로 넘겨야 한다)
     var onPassThrough: ((NSEvent) -> Void)?
+    /// Shift+h(true: 뒤로)·Shift+l(false: 앞으로)
+    var onHistory: ((Bool) -> Void)?
+    /// Shift+j(true: 앞 탭)·Shift+k(false: 뒤 탭)
+    var onTab: ((Bool) -> Void)?
     /// 고른 영역이 사라졌거나 키 창이 바뀌었을 때. 웹 페이지는 문서가 바뀌면(같은 사이트 안에서 옮겨 가도)
     /// 스크롤 영역 요소를 새로 만든다. 누른 것이 새 창을 열면 키 창이 바뀐다.
     var onStale: (() -> Void)?
@@ -312,17 +318,32 @@ final class ScrollMode: Mode {
             if lens > 0 { Draw.faded(lens * 0.35) { color.setFill(); NSBezierPath(ovalIn: blob).fill() } }
             Draw.box(blob, color: color, width: width, radius: max(2, Draw.blobRadius(blob, stretch: stretch, lens: lens) - 6))
         }
+        // 창이 여러 개면 숫자는 창을 고른다(지금 창이 아닌 번호는 흐리게), 하나면 영역을 고른다
+        for (i, p) in Self.numberSpots(windows: windows, areas: areas).enumerated() where rect.contains(p) {
+            Draw.numberBadge("\(i + 1)", dim: multiWindow && i != currentWindow, center: p, within: rect)
+        }
+    }
+
+    /// 숫자 키로 고르는 곳의 번호 자리(1번부터). 창이 여러 개면 창마다 위쪽 가운데, 하나면 영역마다 왼쪽 위.
+    /// 고를 것이 하나뿐이면 비어 있다. 라벨 모드도 같은 번호를 그려서 번호로 바로 넘어온다(choose).
+    static func numberSpots(windows: [Element], areas: [(area: Element, window: Int)]) -> [CGPoint] {
+        if windows.count > 1 {
+            return windows.prefix(9).map { CGPoint(x: $0.visibleFrame.midX, y: $0.visibleFrame.minY + 14) }
+        }
+        guard areas.count > 1 else { return [] }
+        return areas.prefix(9).map { CGPoint(x: $0.area.visibleFrame.minX + 14, y: $0.area.visibleFrame.minY + 12) }
+    }
+
+    /// 라벨에서 번호를 눌러 넘어왔을 때: 그 창(창이 여럿이면)이나 영역으로 옮긴다. 스크롤 모드의 숫자 키와 달리
+    /// 이미 그 창이어도 다음 영역으로 넘기지 않는다.
+    func choose(number n: Int) {
+        touched = true
+        defer { Log.write("라벨에서 \(n)번 → 영역 \(index)") }
         if multiWindow {
-            // 숫자는 창을 고른다: 각 창 위쪽 가운데에 번호
-            for (i, w) in windows.prefix(9).enumerated() {
-                let p = CGPoint(x: w.visibleFrame.midX, y: w.visibleFrame.minY + 14)
-                if rect.contains(p) { Draw.pill("\(i + 1)", typedCount: i == currentWindow ? 0 : 1, center: p, within: rect) }
-            }
-        } else if areas.count > 1 {
-            for (i, a) in areas.prefix(9).enumerated() {
-                let corner = CGPoint(x: a.area.visibleFrame.minX + 14, y: a.area.visibleFrame.minY + 12)
-                if rect.contains(corner) { Draw.pill("\(i + 1)", center: corner, within: rect) }
-            }
+            guard n <= windows.count, currentWindow != n - 1, let i = largestArea(inWindow: n - 1) else { return }
+            focus(i)
+        } else if n <= areas.count, n - 1 != index {
+            focus(n - 1)
         }
     }
 
@@ -554,6 +575,18 @@ final class ScrollMode: Mode {
             || event.modifierFlags.contains(.control) && character != "n" && character != "p" {
             onPassThrough(event)
             return
+        }
+        // Shift + 왼쪽·오른쪽 키(기본 h·l): 뒤로·앞으로, Shift + 아래·위 키(기본 j·k): 앞·뒤 탭 (Vimium 의 H·L·J·K)
+        let keys = Config.scrollKeys
+        if event.modifierFlags.contains(.shift), let c = character {
+            if let onHistory, c == keys[0] || c == keys[3] {
+                onHistory(c == keys[0])
+                return
+            }
+            if let onTab, c == keys[1] || c == keys[2] {
+                onTab(c == keys[1])
+                return
+            }
         }
         if let dir = direction(for: event) {
             driver.hold(event.keyCode, dir)

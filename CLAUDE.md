@@ -14,7 +14,8 @@
 | `wezterm/wezterm.linux-jkhan.lua` | `~/.wezterm.lua` | 리눅스 `jkhan` (스냅샷, 맥과 일부 다름) |
 | `macos-keyboard/karabiner.json` | `~/.config/karabiner/karabiner.json` | 맥 |
 | `hanmium/` | 소스 (빌드: `hanmium/build.sh` → `hanmium/build/Hanmium.app`) | 맥 |
-| `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (설정 › 고급 › 가져오기·내보내기) | 맥 |
+| `macos-keyboard/hanmium-keyboard.json` | `~/Library/Application Support/Hanmium/keyboard.json` (Hanmium 키보드 규칙, Karabiner 대신) | 맥 |
+| `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (설정 › 일반 › 가져오기·내보내기) | 맥 |
 | `macos-keyboard/homerow.plist` | `~/Library/Preferences/com.superultra.Homerow.plist` | 맥 (참고용 — Homerow 는 지웠다) |
 | `linux-keyboard/xkb/keymap/jkhan` | `~/.xkb/keymap/jkhan` | 리눅스 `jkhan` |
 | `linux-keyboard/xkb/symbols/jkhan` | `~/.xkb/symbols/jkhan` | 리눅스 `jkhan` |
@@ -143,7 +144,8 @@ Homerow 를 참고해 Swift 로 다시 만든 메뉴 막대 앱. 2026-11-04 에 
 - **빌드·실행**: `cd hanmium && ./build.sh && open -n build/Hanmium.app`. 키체인에 "Hanmium Local Code Signing"
   인증서가 있으면 그걸로 서명해서 다시 빌드해도 손쉬운 사용 권한이 유지된다(없으면 임시 서명이라 빌드마다 다시 허용).
 - **권한**: 손쉬운 사용(필수), 화면 기록(유리 라벨 굴절 — 없으면 흐림으로 그림).
-- **설정 백업 갱신**: 설정 › 고급 › 설정 내보내기… 로 `macos-keyboard/hanmium-settings.json` 에 덮어쓴다.
+- **설정 백업 갱신**: 설정 › 일반 › 설정 내보내기… 로 `macos-keyboard/hanmium-settings.json` 에 덮어쓴다. 키보드 규칙은 `~/Library/Application Support/Hanmium/keyboard.json` 을 `macos-keyboard/hanmium-keyboard.json` 으로 복사한다.
+- **시험**: 기능을 고친 뒤 `hanmium/Tools/run-all-tests.sh` (화면·키보드를 건드리지 않음), 실제 키 시험까지는 `--live` (사용자가 키보드에서 손을 뗐을 때만). 자세한 것은 `hanmium/TESTING.md`.
 - **문제가 생기면**: `~/Library/Logs/Hanmium.log`(스크롤 모드 판단·라벨 시간), 메뉴 막대 › "‹앱› 점검…",
   `hanmium/Tools/check-apps.sh`(실행 중인 앱 호환성 점검), `hanmium/Tools/e2e-wezterm.sh`(시험용 WezTerm 창 회귀 테스트).
   테스트·측정 기록은 `hanmium/TESTING.md`.

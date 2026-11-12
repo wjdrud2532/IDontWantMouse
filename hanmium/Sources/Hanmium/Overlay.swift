@@ -362,6 +362,36 @@ enum Draw {
         s.draw(at: CGPoint(x: r.minX + pad.width, y: r.minY + pad.height))
     }
 
+    /// 스크롤 영역(창) 번호. 라벨(유리·테마 색)과 헷갈리지 않게 진한 주황 바탕에 흰 굵은 숫자로 칠한다.
+    /// dim: 스크롤 모드에서 지금 창이 아닌 번호(옅게).
+    static let numberColor = NSColor(srgbRed: 1.0, green: 0.42, blue: 0.0, alpha: 1)
+    static let numberFont = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .heavy)
+
+    static func numberBadge(_ text: String, dim: Bool = false, center: CGPoint, within bounds: CGRect) {
+        guard collecting == nil else { return }
+        let s = NSAttributedString(string: text, attributes: [.font: numberFont, .foregroundColor: NSColor.white])
+        let size = s.size()
+        let h = size.height + 6
+        var r = CGRect(x: center.x - max(h, size.width + 12) / 2, y: center.y - h / 2,
+                       width: max(h, size.width + 12), height: h)
+        r.origin.x = min(max(r.minX, bounds.minX), bounds.maxX - r.width)
+        r.origin.y = min(max(r.minY, bounds.minY), bounds.maxY - r.height)
+        let path = NSBezierPath(roundedRect: r, xRadius: h / 2, yRadius: h / 2)
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 4
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowColor = NSColor(white: 0, alpha: 0.45)
+        NSGraphicsContext.saveGraphicsState()
+        shadow.set()
+        numberColor.withAlphaComponent(dim ? 0.45 : 1).setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor(white: 1, alpha: dim ? 0.5 : 0.9).setStroke()
+        path.lineWidth = 1.5
+        path.stroke()
+        s.draw(at: CGPoint(x: r.midX - size.width / 2, y: r.midY - size.height / 2))
+    }
+
     /// 바깥에만 그림자. 유리 속이 비치므로 안쪽까지 어둡게 하지 않는다. radius 가 없으면 알약.
     private static func glassShadow(_ r: CGRect, radius: CGFloat? = nil, dark: Bool, strength: CGFloat = 1) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }

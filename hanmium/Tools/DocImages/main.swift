@@ -234,7 +234,7 @@ MainActor.assumeIsolated {
     _ = NSApplication.shared
     SettingsView.height = 1700
     var shots: [(rep: NSBitmapImageRep, height: CGFloat)] = []
-    for tab in SettingsView.Tab.allCases {
+    for tab in SettingsView.Tab.hanmium {
         SettingsView.forcedTab = tab
         let view = NSHostingView(rootView: SettingsView(onHotkeysChanged: {}, onRecording: { _ in }))
         let size = CGSize(width: 460, height: SettingsView.height)

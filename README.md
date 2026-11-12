@@ -8,9 +8,10 @@
 |------|------|-----------|
 | `wezterm/wezterm.lua` | WezTerm 설정 (크로스플랫폼 공용, 맥 기준 최신). Leader(Ctrl+a) 기반 분할/이동, 포커스된 pane 초록 배경 표시, pane 이동 0ms 반영 등 | macOS `~/.wezterm.lua` |
 | `wezterm/wezterm.linux-jkhan.lua` | Linux(jkhan) 박스의 WezTerm 설정 스냅샷 (맥 버전과 일부 다름) | Linux `~/.wezterm.lua` |
-| `macos-keyboard/karabiner.json` | Karabiner-Elements 설정. 넘패드로 마우스 제어 + `₩`(grave = 숫자 1 왼쪽) 레이어(방향키 / +Space 단어·단락 이동) + `Opt` 레이어(마우스 포인터 / +₩ 클릭·스크롤). 한영 전환은 Karabiner 밖(Fn 지구본 키) | macOS `~/.config/karabiner/karabiner.json` |
+| `macos-keyboard/karabiner.json` | Karabiner-Elements 설정. 넘패드로 마우스 제어 + `₩`(grave = 숫자 1 왼쪽) 레이어(방향키 / +Space 단어·단락 이동) + `Opt` 레이어(마우스 포인터 / +₩ 클릭·스크롤). 한영 전환은 Karabiner 밖(Fn 지구본 키). 2026-11-12 부터 같은 규칙을 Hanmium 이 맡아 Karabiner 는 끄고 참고용으로 둔다 | macOS `~/.config/karabiner/karabiner.json` |
 | [`hanmium/`](hanmium/) | **Hanmium** — 직접 만든 앱(Swift). 키보드로 화면 요소 라벨 클릭(`⌥Space`)·검색(`⌥/`)·스크롤(`⇧⌘J`), 리퀴드 글래스 라벨. 소스 전체 — 사용법·기능·설정은 [hanmium/README.md](hanmium/README.md) | 빌드해서 실행 (아래 복원 방법) |
-| `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (라벨·스크롤·유리 효과 등, 기본값과 다른 것만) | Hanmium 설정 › 고급 › 설정 가져오기 |
+| `macos-keyboard/hanmium-keyboard.json` | Hanmium 키보드 규칙 (Karabiner 에서 옮겨 온 규칙: 넘패드 마우스 모드, `₩` 레이어, `⌥hjkl` 포인터, Tab → 라벨) | macOS `~/Library/Application Support/Hanmium/keyboard.json` |
+| `macos-keyboard/hanmium-settings.json` | Hanmium 설정 (라벨·스크롤·유리 효과 등, 기본값과 다른 것만) | Hanmium 설정 › 일반 › 설정 가져오기 |
 | `macos-keyboard/homerow.plist` | Homerow 설정 (참고용 — 2026-11-04 에 Homerow 를 지우고 Hanmium 으로 바꿨다) | macOS `~/Library/Preferences/com.superultra.Homerow.plist` |
 | `linux-keyboard/xkb/keymap/jkhan` | 커스텀 XKB keymap | Linux `~/.xkb/keymap/jkhan` |
 | `linux-keyboard/xkb/symbols/jkhan` | 커스텀 XKB symbols | Linux `~/.xkb/symbols/jkhan` |
@@ -23,7 +24,8 @@
 cp wezterm/wezterm.lua ~/.wezterm.lua
 ```
 
-### macOS — 키보드 (Karabiner-Elements)
+### macOS — 키보드
+지금은 Hanmium 이 키를 바꾼다(아래 Hanmium 복원의 키보드 규칙). Karabiner-Elements 로 되돌릴 때만:
 ```bash
 cp macos-keyboard/karabiner.json ~/.config/karabiner/karabiner.json
 ```
@@ -35,7 +37,12 @@ cd hanmium
 open build/Hanmium.app
 ```
 - 처음 실행하면 **손쉬운 사용** 권한(필수)과 **화면 기록** 권한(유리 라벨의 굴절용)을 허용한다.
-- 설정 복원: 메뉴 막대 Hanmium 아이콘 › 설정… › 고급 › **설정 가져오기…** 에서 `macos-keyboard/hanmium-settings.json` 선택.
+- 설정 복원: 메뉴 막대 Hanmium 아이콘 › 설정 열기… › 일반 › **설정 가져오기…** 에서 `macos-keyboard/hanmium-settings.json` 선택.
+- 키보드 규칙 복원: Hanmium 을 끈 상태에서 아래처럼 복사한 뒤 실행하고, 설정 › 키보드 규칙에서 **키 바꾸기**를 켠다.
+  ```bash
+  mkdir -p ~/Library/Application\ Support/Hanmium
+  cp macos-keyboard/hanmium-keyboard.json ~/Library/Application\ Support/Hanmium/keyboard.json
+  ```
 - 단축키: `⌥Space` 라벨 클릭, `⌥/` 검색, `⇧⌘J` 스크롤. 자세한 테스트·측정 기록은 [`hanmium/TESTING.md`](hanmium/TESTING.md).
 
 ### macOS — Homerow (예전 설정, 참고용)

@@ -34,6 +34,7 @@
 - [사용법](#사용법) — [라벨 클릭](#라벨-클릭--space) · [검색](#검색--) · [스크롤](#스크롤--j)
 - [예시: Slack 을 키보드만으로](#예시-slack-을-키보드만으로)
 - [리퀴드 글래스](#리퀴드-글래스)
+- [키보드 규칙 (Karabiner 대신)](#키보드-규칙-karabiner-대신)
 - [설정](#설정)
 - [문제가 생기면](#문제가-생기면)
 - [구조](#구조)
@@ -54,6 +55,7 @@
 - **리퀴드 글래스**: 단축키를 누를 때 화면을 찍어(Hanmium 자신은 빼고) 라벨·스크롤 테두리 가장자리에서 실제로 굴절시킨다.
   - 계산은 GPU(Metal)로 한다.
   - 라벨이 다 그려지기까지 단축키를 누르고 80ms 안팎.
+- **키보드 규칙**: Karabiner-Elements 의 복합 규칙과 같은 JSON 으로 키를 바꾼다(키 → 키, 레이어, 혼자 누르기, 마우스 키·클릭·휠, Hanmium 모드 열기). Karabiner 설정에서 그대로 가져온다.
 - **앱별 사용**: 특정 앱에서만 끄거나, 특정 앱에서만 켠다. 꺼진 앱이 앞에 있으면 단축키를 놓아서 그 앱이 키를 그대로 받는다.
 - **설정 내보내기·가져오기**: JSON 파일로 옮기거나 되돌린다.
 - **진단**: 앱 호환성 점검, 동작 로그, 단계별 시간 측정.
@@ -109,6 +111,7 @@ open build/Hanmium.app
 | `⌫` | 한 글자 지우기 |
 | `/` | 검색 모드로 바꾸기 |
 | `j` / `k` | 스크롤 모드로 바꾸면서 아래 / 위로 스크롤. 누르고 있으면 스크롤 모드에서 누른 것처럼 계속 간다 |
+| `1`–`9` | 스크롤 영역 번호(라벨이 뜬 뒤 영역을 찾으면 붙는다. 스크롤 모드의 숫자와 같은 번호). 그 영역(창이 여러 개면 그 창)을 고른 채 스크롤 모드로 바꾼다 |
 | `Esc` 또는 `⌥Space` | 닫기 (스크롤 모드의 `f` 로 띄운 라벨이면 `Esc` 는 스크롤 모드로 돌아가고, `⌥Space` 는 모두 닫는다) |
 
 - **WezTerm 분할 창**: 분할 창 라벨을 고르면 마우스를 누르지 않고 `wezterm cli activate-pane` 으로 그 창으로 옮긴다. Claude Code·vim 처럼 마우스를 받는 프로그램에 클릭이 들어가지 않게 하려는 것이다.
@@ -132,7 +135,9 @@ open build/Hanmium.app
 | 키 | 동작 |
 |---|---|
 | `h` `j` `k` `l` · 화살표 | 누르는 동안 부드럽게 스크롤 (방향 키는 설정에서 바꾼다) |
-| 위 키 + `Shift` | 빠르게 |
+| 화살표 + `Shift` | 빠르게 (`Shift` + `h`·`j`·`k`·`l` 은 아래처럼 뒤로·앞으로·탭 이동) |
+| `Shift-j` / `Shift-k` | 앞(왼쪽) / 뒤(오른쪽) 탭. `⌘⇧[`·`⌘⇧]` 를 보내고 옮긴 탭에 스크롤 모드를 다시 연다 |
+| `Shift-h` / `Shift-l` | 뒤로 / 앞으로 (방향 키를 바꿨으면 왼쪽·오른쪽 키). 앱에 맞는 단축키를 보내고 바뀐 화면에 스크롤 모드를 다시 연다: 보통 `⌘[`·`⌘]`, VS Code 계열 `⌃-`·`⌃⇧-`, Xcode `⌃⌘←`·`⌃⌘→`. 터미널은 없음 |
 | `d` / `u` | 반 페이지 아래 / 위 (누르고 있으면 빠르게 계속) |
 | `gg` / `G` | 맨 위 / 맨 아래 |
 | `1`–`9` | 창이 여러 개면 그 번호의 창 (같은 번호를 다시 누르면 그 창의 다음 영역), 창이 하나면 그 번호의 영역 |
@@ -220,18 +225,37 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 
 **라벨 색상**은 유리 · 유리 다크 · 다크 · 라이트 · 노랑 · 파랑 · 초록 · 빨강 · 보라 중에서 고른다. 유리를 고르면 굴절 강도 · 반사도 · 흐림 · 색 진하기를 미리보기를 보며 조절한다.
 
+## 키보드 규칙 (Karabiner 대신)
+
+Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정 창 › **키보드 규칙**.
+
+- **같은 형식**: 규칙은 Karabiner 의 `complex_modifications` 규칙 JSON 그대로다. 처음 켤 때 Karabiner 설정(선택된 프로필)에서 규칙·단순 바꾸기·매개변수를 가져온다. 나중에 **Karabiner 에서 다시 가져오기** 로 다시 맞출 수 있다.
+- **Hanmium 모드 바로 열기**: `{"hanmium": "labels"}` · `"search"` · `"scroll"`. 가져올 때 Hanmium 단축키(예: ⌥Space)를 보내던 조작은 이것으로 바뀐다. 단축키를 거치지 않아서, Hanmium 이 꺼졌거나 그 앱에서 쓰지 않으면 원래 키(예: Tab)가 그대로 간다.
+- **지원하는 것**: `from.key_code` + `modifiers`(mandatory·optional), 조건 `variable_if/unless`·`frontmost_application_if/unless`, `to`·`to_if_alone`·`to_after_key_up` 의 `key_code`(+modifiers)·`pointing_button`(button1–5)·`mouse_key`(x·y·휠·speed_multiplier)·`set_variable`, 매개변수 `basic.to_if_alone_timeout_milliseconds`. 그 밖의 것(`simultaneous`, `shell_command`, `to_if_held_down` 등)이 든 조작은 건너뛰고 목록에 ⚠︎ 로 표시한다.
+- **Karabiner 와 같이 켜 두면**: Karabiner 가 키를 먼저 바꿔서 같은 키의 Hanmium 규칙은 동작하지 않는다. 키보드 규칙 화면의 **Karabiner 복합 규칙 모두 끄기** 로 Karabiner 쪽 규칙의 `enabled` 만 끈다(바꾸기 전 파일은 `karabiner.json.bak-before-hanmium-…` 으로 남고, **다시 켜기** 로 되돌린다).
+- **한계**: macOS 이벤트 탭으로 키를 받는다. 비밀번호 입력처럼 보안 입력이 켜진 동안에는 시스템이 키를 보여 주지 않아 바뀌지 않는다(Karabiner 는 드라이버라서 바뀐다). 수정키 자체(Caps Lock 등)를 다른 키로 바꾸는 것은 아직 안 된다.
+
+| 화면 | 하는 일 |
+|---|---|
+| 키보드 규칙 | 켜기·끄기, Karabiner 와 겹침 안내·끄기, 규칙 목록(체크로 켜고 끄기, 펼치면 조작 요약, JSON 편집·순서·삭제), 규칙 추가(JSON) |
+| 단순 바꾸기 | 키 하나 → 키 하나(Karabiner 의 Simple Modifications). 키 확인 칸에 키를 치면 `key_code` 이름과 키 코드를 보여 준다 |
+| 키보드 매개변수 | 혼자 누르기 제한 시간, 마우스 키 포인터·휠 속도 |
+
+규칙 파일은 `~/Library/Application Support/Hanmium/keyboard.json` 이다.
+
 ## 설정
 
-메뉴 막대 아이콘 › **설정…**
+메뉴 막대 아이콘 › **설정 열기…** (메뉴에는 상태만 보이고, 설정은 모두 이 창에서 한다)
 
-![설정 창 — 일반 · 라벨 · 스크롤 세 탭](docs/images/settings.png)
+![설정 창 — 일반 · 라벨 · 스크롤](docs/images/settings.png)
 
-설정은 **일반 · 라벨 · 스크롤** 세 탭으로 나뉜다.
+설정 창은 Karabiner-Elements 처럼 왼쪽 목록에서 화면을 고른다: **일반 · 라벨 · 스크롤**, **키보드 규칙 · 단순 바꾸기 · 키보드 매개변수**(위 [키보드 규칙](#키보드-규칙-karabiner-대신)).
 
 | 탭 | 구역 | 항목 |
 |---|---|---|
 | 일반 | | Hanmium 사용, 로그인 시 자동 실행, 화면 기록 권한 안내 |
-| | 앱별 사용 | 목록의 앱에서만 끄기 / 목록의 앱에서만 쓰기, 앱 추가 |
+| | 앱별 사용 | 목록의 앱에서만 끄기 / 목록의 앱에서만 쓰기, 앱 추가(실행 중인 앱에서 고르기) |
+| | 앱 점검 | 실행 중인 앱을 골라 점검(`--check` 와 같음) |
 | | 설정 파일 | 내보내기·가져오기, 기본값으로 되돌리기 |
 | 라벨 | 단축키 | 라벨 클릭·검색 단축키와 켜기·끄기 |
 | | 라벨 | 라벨 문자, 닫힐 때 서서히 사라지기 |
@@ -242,7 +266,7 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | | 고른 영역 테두리 | 표시, 모양(리퀴드 글래스/실선), 두께, 유리 굴절 강도, 색, 닫힐 때 서서히 사라지기, 영역 이동 효과와 속도 |
 | | 고르지 않은 영역 | 표시, 모양(리퀴드 글래스/점선), 색, 진하기, 유리 굴절 강도, 영역 전체 굴절(기본 켜짐), 끄면 굴절 범위(가장자리에서 안쪽으로 4–80pt), 배경도 굴절(기본 켜짐) |
 
-- **메뉴 막대 메뉴**: 단축키 상태, 사용 켜기·끄기, 지금 앱에서 끄기/켜기, 지금 앱 점검을 바로 할 수 있다.
+- **메뉴 막대 메뉴**: 실행·권한 상태, 단축키, 키보드 규칙 상태와 **설정 열기…**·종료만 있다.
 - **명령으로 바꾸기**: `defaults write com.local.Hanmium <키> <값>` 으로도 바꿀 수 있다. 단축키 외에는 바로 적용된다.
 
 ## 문제가 생기면
@@ -256,6 +280,10 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `Tools/check-apps.sh` | 위 점검을 빌드와 함께 (코드를 고친 뒤 회귀 확인) |
 | `Tools/e2e-wezterm.sh` | 시험용 WezTerm 창을 띄워 스크롤 모드를 실제 키로 돌려 보는 회귀 테스트 |
 | `Tools/scroll-fixtures.sh` | 웹 스크롤 영역 회귀 테스트. 잘못 잡았던(놓쳤던) 웹 요소를 모은 시험 페이지(`Tools/ScrollFixtures/pages`)를 키 포커스를 가져가지 않는 창에 띄우고, 찾은 영역이 페이지에 적은 기대와 같은지 본다. 새 오인식을 찾으면 페이지를 하나 더 만들고 통과할 때까지 고친다 |
+| `Tools/keyboard-fixtures.sh` | 키보드 규칙 엔진 회귀 테스트. Karabiner 에서 옮겨 온 규칙과 같은 모양(`Tools/KeyboardFixtures/rules.json`)에 키 입력을 차례로 넣고 내보내는 키·클릭·포인터 이동이 맞는지 본다. 실제 키를 보내지 않는다 |
+| `Tools/run-all-tests.sh` | 아래 회귀 테스트를 한 번에 돌리고 결과를 모아 보여 준다. `--live` 를 붙이면 실제 키 시험까지 |
+| `Tools/live-keys.sh` | 키보드 규칙을 실제 키 경로로 시험(35개). 바뀐 키·클릭·휠은 앱에 닿기 전에 버리므로 쓰고 있는 창에는 아무것도 들어가지 않는다 |
+| `Tools/live-modes.sh` | 시험 창을 띄워 라벨·스크롤 모드를 실제 키로 시험(라벨에서 j 꾹, 영역 번호, Shift+H/L/J/K, f, 닫기) |
 | `Tools/wezterm-fixtures.sh` | WezTerm 패널 배치 회귀 테스트. 틀렸던 CLI 출력(화면을 옮긴 뒤 남은 픽셀 값 등)과 창 크기를 `Tools/WezTermFixtures/cases` 에 남겨 두고, 계산한 패널 영역이 화면에서 확인한 값과 같은지 본다. 화면·WezTerm 을 건드리지 않는다 |
 | `defaults write com.local.Hanmium profile -bool true` | 라벨 찾기 단계별 시간을 로그에 남긴다 (끄기: `defaults delete com.local.Hanmium profile`) |
 
@@ -281,7 +309,11 @@ Slack 은 Electron 앱이라 스크롤 영역을 손쉬운 사용 정보로 알�
 | `GlassGPU.swift` | 굴절 Metal 셰이더 (실행 중 컴파일) |
 | `Droplet.swift` | 영역 이동 물방울 움직임(스프링) |
 | `Diagnostics.swift` | 앱 호환성 점검 |
-| `Settings.swift` | 설정 창(SwiftUI) |
+| `KeyboardRules.swift` | 키보드 규칙(Karabiner 형식) 읽기, 키 이름, 저장, Karabiner 가져오기·규칙 끄기 |
+| `KeyboardEngine.swift` | 키 입력 → 내보낼 키·버튼·마우스 키 (시스템을 건드리지 않는 상태 기계) |
+| `KeyboardTap.swift` | 이벤트 탭으로 키를 받아 엔진에 묻고 보내기, 마우스 키(포인터·휠·클릭) |
+| `KeyboardSettings.swift` | 설정 창의 키보드 화면(규칙·단순 바꾸기·매개변수·키 확인) |
+| `Settings.swift` | 설정 창(SwiftUI, 왼쪽 목록) |
 | `StatusItem.swift` | 메뉴 막대 아이콘과 메뉴 |
 | `Config.swift` | 설정 값, 설정 내보내기·가져오기 |
 | `Demos/` | 기능을 넣기 전에 비교해 본 예시 앱 (`Demos/build.sh DropletDemo`, `LinkLabelsDemo`, `GlassTransitionDemo`) |

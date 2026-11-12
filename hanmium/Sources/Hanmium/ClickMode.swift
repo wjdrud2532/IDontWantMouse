@@ -12,6 +12,10 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     var onExit: (() -> Void)?
     /// 라벨 모드에서 j·k: 스크롤 모드로 바꾸고 그 키를 스크롤 모드에 넘긴다
     var onScroll: ((NSEvent) -> Void)?
+    /// 라벨 모드에서 1~9: 그 번호의 스크롤 영역(창)을 고른 채 스크롤 모드로 바꾼다
+    var onScrollNumber: ((Int) -> Void)?
+    /// 스크롤 영역 번호를 그릴 자리(ScrollMode.numberSpots). 뒤에서 스크롤 영역을 찾은 뒤에 채운다.
+    private var scrollNumbers: [CGPoint] = []
     /// 스크롤 모드가 뜨기를 기다리는 중: 보이지 않게 하고 키 포커스만 쥐고 있다(hideForHandoff)
     private var handingOff = false
     /// 눌러서 닫혔으면 누른 대상 (Esc 로 닫았으면 nil)
@@ -58,6 +62,12 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
         onExit?()
     }
 
+    /// 미리 찾은 스크롤 영역에 번호를 붙인다. 그 번호를 누르면 그 영역을 고른 채 스크롤 모드로 간다.
+    func showScrollNumbers(_ spots: [CGPoint]) {
+        scrollNumbers = spots
+        overlay.redraw()
+    }
+
     // MARK: 그리기
 
     private func paint(_ rect: CGRect) {
@@ -67,6 +77,9 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
                 let p = t.clickPoint
                 guard rect.contains(p) else { continue }
                 Draw.pill(labels[i].uppercased(), typedCount: typed.count, center: p, within: rect)
+            }
+            for (i, p) in scrollNumbers.enumerated() where rect.contains(p) {
+                Draw.numberBadge("\(i + 1)", center: p, within: rect)
             }
         case .search:
             for (n, i) in results.enumerated() {
@@ -99,6 +112,10 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
         guard let c = KeyTranslator.character(for: event.keyCode) else { return }
         if c == Config.labelToSearchKey {
             switchToSearch()
+            return
+        }
+        if let n = c.wholeNumberValue, n >= 1, n <= scrollNumbers.count, let onScrollNumber {
+            onScrollNumber(n)
             return
         }
         if Config.labelToScrollKeys.contains(c), let onScroll,

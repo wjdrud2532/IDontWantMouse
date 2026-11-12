@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-/// 메뉴 막대 아이콘. 실행 중인지, 단축키·권한 상태를 보여주고 사용 전환·설정을 연다.
+/// 메뉴 막대 아이콘. 실행 중인지, 단축키·권한 상태를 보여주고 설정 창을 연다. 설정은 모두 설정 창에서 한다.
 final class StatusItem: NSObject, NSMenuDelegate {
     enum HotkeyState { case registered, failed, off }
 
@@ -12,11 +12,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
     }
 
     var hotkeys: [Hotkey] = []
-    var onToggleEnabled: (() -> Void)?
     var onOpenSettings: (() -> Void)?
-    /// 번들 ID 를 앱별 사용 목록에 넣거나 뺀다
-    var onToggleListed: ((String) -> Void)?
-    var onCheckApp: ((NSRunningApplication) -> Void)?
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
@@ -108,39 +104,17 @@ final class StatusItem: NSObject, NSMenuDelegate {
             ])
             menu.addItem(line)
         }
+        let keyboard = KeyboardStore.shared.enabled
+            ? (KeyboardTap.shared.running ? "키보드 규칙 켜짐" : "키보드 규칙: 키 입력을 받지 못함") : "키보드 규칙 꺼짐"
+        menu.addItem(withTitle: keyboard, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-        let toggle = menu.addItem(withTitle: "Hanmium 사용", action: #selector(toggleEnabled), keyEquivalent: "")
-        toggle.target = self
-        toggle.state = Config.enabled ? .on : .off
-        // 지금 앱을 앱별 사용 목록에 넣거나 뺀다. 방식에 따라 '사용 안 함' 목록이거나 '사용' 목록이다.
-        if let app = frontmostOther, let id = app.bundleIdentifier {
-            let name = app.localizedName ?? id
-            let title = Config.appFilterMode == .include ? "\(name)에서 사용" : "\(name)에서 사용 안 함"
-            let listed = menu.addItem(withTitle: title, action: #selector(toggleListed(_:)), keyEquivalent: "")
-            listed.target = self
-            listed.representedObject = id
-            listed.state = Config.isListed(id) ? .on : .off
-            let check = menu.addItem(withTitle: "\(name) 점검…", action: #selector(checkApp(_:)), keyEquivalent: "")
-            check.target = self
-            check.representedObject = app
-        }
-        let settings = menu.addItem(withTitle: "설정…", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = menu.addItem(withTitle: "설정 열기…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Hanmium 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
-    @objc private func toggleEnabled() { onToggleEnabled?() }
-
-    @objc private func toggleListed(_ sender: NSMenuItem) {
-        if let id = sender.representedObject as? String { onToggleListed?(id) }
-    }
-
     @objc private func openSettings() { onOpenSettings?() }
-
-    @objc private func checkApp(_ sender: NSMenuItem) {
-        if let app = sender.representedObject as? NSRunningApplication { onCheckApp?(app) }
-    }
 
     /// 유리를 쓰는데 화면 기록 권한이 없어 굴절 대신 흐림으로 그리는 중인지
     static var glassNeedsCapture: Bool { GlassSnapshots.usesGlass && !CGPreflightScreenCaptureAccess() }

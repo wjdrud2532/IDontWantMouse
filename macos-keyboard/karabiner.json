@@ -1,7 +1,6 @@
 {
     "global": {
-        "enable_notification_window": false,
-        "show_profile_name_in_menu_bar": true
+        "enable_notification_window": false
     },
     "profiles": [
         {
@@ -425,7 +424,43 @@
                         ]
                     },
                     {
-                        "description": "~ + Space + h/j/k/l → 단어(←/→) / 단락(↑/↓) 단위 이동",
+                        "description": "[임시 진단] ~ + Space + LeftShift + ; → 9",
+                        "manipulators": [
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "semicolon",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "left_shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "9"
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "~ + Space + h/j/k/l → 단어(←/→) / 단락(↑/↓) 단위 이동 (+Shift: 선택)",
                         "manipulators": [
                             {
                                 "conditions": [
@@ -482,6 +517,42 @@
                                 "from": {
                                     "key_code": "h",
                                     "modifiers": {
+                                        "mandatory": [
+                                            "left_shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "left_arrow",
+                                        "modifiers": [
+                                            "left_option",
+                                            "left_shift",
+                                            "right_shift"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "h",
+                                    "modifiers": {
                                         "optional": [
                                             "any"
                                         ]
@@ -492,6 +563,42 @@
                                         "key_code": "left_arrow",
                                         "modifiers": [
                                             "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "j",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "left_shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "down_arrow",
+                                        "modifiers": [
+                                            "left_option",
+                                            "left_shift",
+                                            "right_shift"
                                         ]
                                     }
                                 ],
@@ -544,6 +651,42 @@
                                 "from": {
                                     "key_code": "k",
                                     "modifiers": {
+                                        "mandatory": [
+                                            "left_shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "up_arrow",
+                                        "modifiers": [
+                                            "left_option",
+                                            "left_shift",
+                                            "right_shift"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "k",
+                                    "modifiers": {
                                         "optional": [
                                             "any"
                                         ]
@@ -554,6 +697,42 @@
                                         "key_code": "up_arrow",
                                         "modifiers": [
                                             "left_option"
+                                        ]
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    },
+                                    {
+                                        "name": "word_mode",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "l",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "left_shift"
+                                        ],
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "right_arrow",
+                                        "modifiers": [
+                                            "left_option",
+                                            "left_shift",
+                                            "right_shift"
                                         ]
                                     }
                                 ],
@@ -596,7 +775,6 @@
                         "description": "~ + h/j/k/l → 방향키 (←/↓/↑/→) / +Opt: h,l = 좌·우 클릭, k,j = 위·아래 스크롤",
                         "manipulators": [
                             {
-                                "type": "basic",
                                 "from": {
                                     "key_code": "grave_accent_and_tilde",
                                     "modifiers": {
@@ -605,19 +783,6 @@
                                         ]
                                     }
                                 },
-                                "to_if_alone": [
-                                    {
-                                        "key_code": "grave_accent_and_tilde"
-                                    }
-                                ],
-                                "to_after_key_up": [
-                                    {
-                                        "set_variable": {
-                                            "name": "nav_held",
-                                            "value": 0
-                                        }
-                                    }
-                                ],
                                 "parameters": {
                                     "basic.to_if_alone_timeout_milliseconds": 1000
                                 },
@@ -628,7 +793,21 @@
                                             "value": 1
                                         }
                                     }
-                                ]
+                                ],
+                                "to_after_key_up": [
+                                    {
+                                        "set_variable": {
+                                            "name": "nav_held",
+                                            "value": 0
+                                        }
+                                    }
+                                ],
+                                "to_if_alone": [
+                                    {
+                                        "key_code": "grave_accent_and_tilde"
+                                    }
+                                ],
+                                "type": "basic"
                             },
                             {
                                 "conditions": [
@@ -826,6 +1005,60 @@
                                 "to": [
                                     {
                                         "key_code": "right_arrow"
+                                    }
+                                ],
+                                "type": "basic"
+                            }
+                        ]
+                    },
+                    {
+                        "description": "Tab → Hanmium 라벨(⌥Space) / ₩ + Tab → 원래 Tab",
+                        "manipulators": [
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_if",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "tab",
+                                    "modifiers": {
+                                        "optional": [
+                                            "any"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "tab"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
+                                "conditions": [
+                                    {
+                                        "name": "nav_held",
+                                        "type": "variable_unless",
+                                        "value": 1
+                                    }
+                                ],
+                                "from": {
+                                    "key_code": "tab",
+                                    "modifiers": {
+                                        "optional": [
+                                            "caps_lock"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "key_code": "spacebar",
+                                        "modifiers": [
+                                            "left_option"
+                                        ]
                                     }
                                 ],
                                 "type": "basic"
