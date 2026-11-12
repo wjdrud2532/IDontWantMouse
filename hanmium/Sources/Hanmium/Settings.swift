@@ -259,8 +259,8 @@ struct SettingsView: View {
         }
         Section("라벨") {
             TextField("라벨 문자", text: $labelCharacters)
-            note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요. 기본값은 Vimium 과 같은 sadfjklewcmpgh 입니다. "
-                + "라벨이 적으면 한 글자, 많으면 일부만 두 글자가 됩니다.")
+            note("앞쪽 문자가 먼저 쓰입니다. 손이 놓이는 키를 앞에 두세요. 기본값은 sadflewcmpgh 입니다. "
+                + "라벨이 적으면 한 글자, 많으면 일부만 두 글자가 됩니다. / (검색으로)와 j·k (스크롤로)는 라벨에 쓰지 않습니다.")
             Toggle("닫힐 때 서서히 사라지기", isOn: $labelAnimation)
             note("끄면 라벨을 고르거나 Esc 를 누르는 즉시 사라집니다.")
         }

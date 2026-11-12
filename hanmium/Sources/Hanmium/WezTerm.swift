@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 
 /// WezTerm 은 AX 로 분할 패널을 알려주지 않아서 `wezterm cli list` 의 배치(칸 단위)를 화면 좌표로 바꾼다.
 enum WezTerm {
@@ -10,6 +11,7 @@ enum WezTerm {
             let cols: Int
             let pixel_width: Int
             let pixel_height: Int
+            let dpi: Int?
         }
 
         let pane_id: Int
@@ -42,17 +44,34 @@ enum WezTerm {
     }
 
     private static func cli(_ args: [String]) -> Data {
-        guard let exe = executables.first(where: FileManager.default.isExecutableFile) else { return Data() }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: exe)
-        process.arguments = ["cli"] + args
+        guard let process = cliProcess(args) else { return Data() }
         let out = Pipe()
         process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return Data() }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            Log.write("wezterm cli \(args.first ?? "") 실패 (종료 코드 \(process.terminationStatus))")
+        }
         return data
+    }
+
+    /// 화면에 떠 있는 WezTerm 에 붙는 `wezterm cli`.
+    /// WezTerm 안의 셸에서 Hanmium 을 띄우면 그 WezTerm 의 소켓 주소(WEZTERM_UNIX_SOCKET)를 물려받는데,
+    /// 그 WezTerm 을 끄고 다시 켜면 주소가 사라진다. 그러면 CLI 가 없는 소켓에 붙으려고 mux 서버를 띄우고
+    /// 5초쯤 기다리다 실패해서, 패널을 못 찾고 모드도 5초 늦게 열렸다. 그래서 물려받은 주소는 버리고
+    /// 지금 떠 있는 WezTerm 을 CLI 가 직접 찾게 하고, 못 찾으면 서버를 띄우지 않고 바로 끝낸다.
+    private static func cliProcess(_ args: [String]) -> Process? {
+        guard let exe = executables.first(where: FileManager.default.isExecutableFile) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: exe)
+        process.arguments = ["cli", "--no-auto-start"] + args
+        var env = ProcessInfo.processInfo.environment
+        env["WEZTERM_UNIX_SOCKET"] = nil
+        env["WEZTERM_PANE"] = nil
+        process.environment = env
+        process.standardError = FileHandle.nullDevice
+        return process
     }
 
     /// 창 하나에 지금 보이는 탭의 패널들과 그 창의 탭 수
@@ -82,9 +101,26 @@ enum WezTerm {
         }
     }
 
-    static func visibleTabs(for windows: [Element], in panes: [Pane], focused known: Int?? = nil) -> [VisibleTab?] {
+    /// 화면마다 AX 좌표 틀과 배율. NSScreen 은 메인 스레드에서 읽어 넘긴다(TreeBuilder.forFrontmost).
+    struct ScreenScales {
+        let items: [(frame: CGRect, scale: CGFloat)]
+
+        static func current() -> ScreenScales {
+            ScreenScales(items: NSScreen.screens.map { (Screens.axFrame($0), $0.backingScaleFactor) })
+        }
+
+        /// 창 가운데가 있는 화면의 배율
+        func scale(for r: CGRect) -> CGFloat {
+            let mid = CGPoint(x: r.midX, y: r.midY)
+            return items.first { $0.frame.contains(mid) }?.scale ?? items.first?.scale ?? 1
+        }
+    }
+
+    static func visibleTabs(for windows: [Element], in panes: [Pane], focused known: Int?? = nil,
+                            scales: ScreenScales = .current()) -> [VisibleTab?] {
         guard !panes.isEmpty else { return windows.map { _ in nil } }
         let focused = known ?? focusedPaneID()
+        let config = Config.load()
         let byWindow = Dictionary(grouping: panes, by: \.window_id)
         var free = Set(byWindow.keys)
         return windows.map { window in
@@ -96,46 +132,108 @@ enum WezTerm {
                 let visible = mine.first { $0.pane_id == focused }?.tab_id
                     ?? mine.first { $0.is_active && !title.isEmpty && normalized($0.title) == title }?.tab_id
                     ?? first.tab_id
-                guard let tab = tabs[visible], let slack = fit(tab, in: window.frame) else { return nil }
+                guard let tab = tabs[visible],
+                      let layout = layout(tab, tabCount: tabs.count, window: window.frame,
+                                          scale: scales.scale(for: window.frame), config: config) else { return nil }
                 let titled = !title.isEmpty && (normalized(first.window_title) == title
                     || tab.contains { $0.is_active && normalized($0.title) == title })
-                return ((titled ? 0 : 10000) + slack, VisibleTab(panes: tab, tabCount: tabs.count), id)
+                return ((titled ? 0 : 10000) + layout.score, VisibleTab(panes: tab, tabCount: tabs.count), id)
             }
-            guard let best = scored.min(by: { $0.score < $1.score }) else { return nil }
+            guard let best = scored.min(by: { $0.score < $1.score }) else {
+                note("WezTerm 창 짝 없음: AX 창 \(window.frame) 에 맞는 CLI 창이 없음 (CLI 창 \(byWindow.keys.sorted()))")
+                return nil
+            }
             free.remove(best.id)
             return best.tab
         }
     }
 
-    /// 탭 내용(칸 수 × 칸 크기)이 창 안에 들어맞으면 남는 폭 + 높이(여백·제목 막대·탭 바·칸 나머지), 아니면 nil
-    private static func fit(_ tab: [Pane], in f: CGRect) -> CGFloat? {
-        guard let s = tab.first, s.size.cols > 0, s.size.rows > 0, f.width > 0 else { return nil }
-        let cellW = CGFloat(s.size.pixel_width) / CGFloat(s.size.cols)
-        let cellH = CGFloat(s.size.pixel_height) / CGFloat(s.size.rows)
-        let rawW = tab.map { CGFloat($0.left_col + $0.size.cols) * cellW }.max() ?? 0
-        let rawH = tab.map { CGFloat($0.top_row + $0.size.rows) * cellH }.max() ?? 0
-        let scale = max(1, (rawW / f.width).rounded())
-        let slackW = f.width - rawW / scale, slackH = f.height - rawH / scale
-        guard slackW >= -2, slackH >= -2, slackW <= cellW / scale * 3 + 80, slackH <= cellH / scale * 3 + 160
-        else { return nil }
-        return slackW + slackH
+    /// 탭 하나를 창에 놓은 모양. 칸 크기와 첫 칸 왼쪽 위는 포인트(AX 좌표).
+    struct Layout {
+        let cellW: CGFloat
+        let cellH: CGFloat
+        let origin: CGPoint
+        /// 축마다 CLI 픽셀 값을 몇으로 나눠 창에 맞췄는지. nil 이면 맞는 값이 없어 창 길이를 칸 수로 나눈 추정이다.
+        let divisorX: CGFloat?
+        let divisorY: CGFloat?
+        /// 칸을 채우고 남는 폭 + 높이(탭 바 포함)
+        let slack: CGFloat
+
+        /// 여러 창을 짝지을 때 작을수록 맞다. 추정한 축은 크게 깎는다.
+        var score: CGFloat { slack + (divisorX == nil ? 1000 : 0) + (divisorY == nil ? 1000 : 0) }
+    }
+
+    /// 칸 수(정수)와 실제 창 크기를 기준으로 칸 크기를 축마다 따로 정한다.
+    /// CLI 의 픽셀 값(pixel_width·pixel_height)은 화면을 옮긴 뒤 틀린 채 남을 때가 있다. 1배 화면인데 가로만
+    /// 2배 값이고 dpi 도 패널마다 72·144 로 섞였던 적이 있다(2026-11-11). 그래서 화면 배율로 나눈 값이 창에 맞는지
+    /// 보고, 안 맞으면 다른 배율(1·2·3)로 나눠 보고, 그래도 안 맞으면 창 길이를 칸 수로 나눈다.
+    /// WezTerm 은 앞쪽 여백 다음부터 칸을 채우고 칸에 못 미치는 나머지를 뒤쪽에 남기므로, 맞는 칸 크기라면
+    /// 창 길이 − 양쪽 여백 − 칸 수 × 칸 크기 가 0 이상 한 칸 미만이다(위쪽은 탭 바 높이만큼 더).
+    static func layout(_ tab: [Pane], tabCount: Int, window f: CGRect, scale: CGFloat, config: Config) -> Layout? {
+        let cols = tab.map { $0.left_col + $0.size.cols }.max() ?? 0
+        let rows = tab.map { $0.top_row + $0.size.rows }.max() ?? 0
+        guard cols > 0, rows > 0, f.width > 0, f.height > 0, scale > 0 else { return nil }
+        let titleBar = config.titleBar
+            ? NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: .titled).height - 100
+            : 0
+        let contentH = f.height - titleBar
+        let tabBarShown = config.tabBarOnTop(tabs: tabCount)
+
+        func unique(_ values: [CGFloat]) -> [CGFloat] {
+            values.reduce(into: []) { out, v in if v > 0, !out.contains(where: { abs($0 - v) < 0.01 }) { out.append(v) } }
+        }
+        let rawW = unique(tab.filter { $0.size.cols > 0 }.map { CGFloat($0.size.pixel_width) / CGFloat($0.size.cols) })
+        let rawH = unique(tab.filter { $0.size.rows > 0 }.map { CGFloat($0.size.pixel_height) / CGFloat($0.size.rows) })
+
+        /// 한 축을 푼다. extra: 남는 길이에 더 들어갈 수 있는 것(탭 바)의 최대치, reserve: 추정할 때 그 몫.
+        func solve(count: Int, length: CGFloat, raw: [CGFloat], lead: String, trail: String,
+                   leadCells: CGFloat, trailCells: CGFloat, extra: CGFloat, reserve: CGFloat)
+            -> (start: CGFloat, cell: CGFloat, slack: CGFloat, divisor: CGFloat?) {
+            func pads(_ c: CGFloat) -> (CGFloat, CGFloat) {
+                (config.padding(lead, cell: c, window: length, pixelScale: scale, defaultCells: leadCells),
+                 config.padding(trail, cell: c, window: length, pixelScale: scale, defaultCells: trailCells))
+            }
+            let divisors = [scale] + [1, 2, 3].filter { $0 != scale }
+            for r in raw {
+                for d in divisors {
+                    let c = r / d
+                    guard c >= 3 else { continue }
+                    let (a, b) = pads(c)
+                    let slack = length - a - b - CGFloat(count) * c
+                    if slack >= -2, slack < c + 2 + extra { return (a, c, slack, d) }
+                }
+            }
+            var c = (length - reserve) / CGFloat(count)
+            for _ in 0..<2 {
+                let (a, b) = pads(c)
+                c = max(1, (length - a - b - reserve) / CGFloat(count))
+            }
+            return (pads(c).0, c, reserve, nil)
+        }
+
+        let x = solve(count: cols, length: f.width, raw: rawW, lead: "left", trail: "right",
+                      leadCells: 1, trailCells: 1, extra: 0, reserve: 0)
+        let y = solve(count: rows, length: contentH, raw: rawH, lead: "top", trail: "bottom",
+                      leadCells: 0.5, trailCells: 0.5, extra: tabBarShown ? 60 : 0, reserve: tabBarShown ? 28 : 0)
+        // 탭 바 높이는 글꼴에 따라 달라서 남는 높이에서 추정한다 (아래 나머지는 한 칸 미만이므로 반 칸으로 본다)
+        let tabBar = !tabBarShown ? 0 : y.divisor == nil ? y.slack : max(0, y.slack - y.cell / 2)
+        return Layout(cellW: x.cell, cellH: y.cell,
+                      origin: CGPoint(x: f.minX + x.start, y: f.minY + titleBar + tabBar + y.start),
+                      divisorX: x.divisor, divisorY: y.divisor, slack: max(0, x.slack) + max(0, y.slack))
     }
 
     /// 패널로 옮긴다. 마우스로 누르면 Claude Code·vim 처럼 마우스를 받는 프로그램에 클릭이 그대로 가서 쓰지 않는다.
     static func activate(pane id: Int) {
-        guard let exe = executables.first(where: FileManager.default.isExecutableFile) else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: exe)
-        process.arguments = ["cli", "activate-pane", "--pane-id", String(id)]
+        guard let process = cliProcess(["activate-pane", "--pane-id", String(id)]) else { return }
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         try? process.run()
     }
 
     /// 창의 패널마다 AX 요소 대신 쓸 영역. 스크롤·라벨 클릭 대상이 된다.
-    static func paneElements(for window: Element, tab: VisibleTab?) -> [Element] {
+    static func paneElements(for window: Element, tab: VisibleTab?, scales: ScreenScales = .current()) -> [Element] {
         guard let tab else { return [] }
-        return paneFrames(for: window, tab: tab.panes, tabCount: tab.tabCount).map { frame, pane in
+        return paneFrames(for: window, tab: tab.panes, tabCount: tab.tabCount,
+                          scale: scales.scale(for: window.frame)).map { frame, pane in
             let e = Element.region(frame, in: window, role: "AXWezTermPane", title: pane.title)
             e.wezTermPane = pane.pane_id
             return e
@@ -143,45 +241,146 @@ enum WezTerm {
     }
 
     /// 창에 보이는 탭의 패널 영역들(AX 좌표). 하나뿐이면 나눌 필요가 없으니 빈 배열.
-    static func paneFrames(for window: Element, tab: [Pane], tabCount: Int) -> [(frame: CGRect, pane: Pane)] {
-        guard tab.count > 1, let sample = tab.first, sample.size.cols > 0, sample.size.rows > 0 else { return [] }
+    static func paneFrames(for window: Element, tab: [Pane], tabCount: Int, scale: CGFloat) -> [(frame: CGRect, pane: Pane)] {
+        guard tab.count > 1, let layout = layout(tab, tabCount: tabCount, window: window.frame, scale: scale,
+                                                 config: Config.load()) else { return [] }
+        if layout.divisorX != scale || layout.divisorY != scale {
+            let sizes = tab.map { "\($0.size.cols)x\($0.size.rows)칸 \($0.size.pixel_width)x\($0.size.pixel_height)px dpi\($0.size.dpi ?? 0)" }
+            func axis(_ d: CGFloat?) -> String { d.map { "÷\(Int($0))" } ?? "창 크기로 추정" }
+            note("WezTerm 픽셀 값이 화면(배율 \(Int(scale)))과 안 맞음: 가로 \(axis(layout.divisorX)), 세로 \(axis(layout.divisorY))"
+                 + " → 칸 \(layout.cellW)x\(layout.cellH)pt · 창 \(window.frame) · 패널 \(sizes.joined(separator: ", "))")
+        }
+        return frames(tab, layout: layout)
+    }
 
-        var cellW = CGFloat(sample.size.pixel_width) / CGFloat(sample.size.cols)
-        var cellH = CGFloat(sample.size.pixel_height) / CGFloat(sample.size.rows)
-        let f = window.frame
-        // Retina 화면에서는 픽셀 단위라 창(포인트)보다 배수로 크다
-        let rawW = tab.map { CGFloat($0.left_col + $0.size.cols) * cellW }.max() ?? 0
-        let scale = max(1, (rawW / f.width).rounded())
-        cellW /= scale
-        cellH /= scale
-        let totalW = rawW / scale
-        let totalH = tab.map { CGFloat($0.top_row + $0.size.rows) * cellH }.max() ?? 0
-        // WezTerm 은 왼쪽 위(제목 막대·탭 바·안쪽 여백 다음)부터 칸을 채우고, 칸에 못 미치는 나머지는
-        // 오른쪽·아래에 남긴다. 그래서 왼쪽·위 여백만 알면 정확하다.
+    static func frames(_ tab: [Pane], layout: Layout) -> [(frame: CGRect, pane: Pane)] {
+        tab.map {
+            (CGRect(x: layout.origin.x + CGFloat($0.left_col) * layout.cellW,
+                    y: layout.origin.y + CGFloat($0.top_row) * layout.cellH,
+                    width: CGFloat($0.size.cols) * layout.cellW, height: CGFloat($0.size.rows) * layout.cellH), $0)
+        }
+    }
+
+    // MARK: - 화면에 그려진 경계선으로 확인
+
+    /// 계산한 패널 경계가 WezTerm 이 실제로 그린 경계선(설정의 split 색, 기본 #444444)과 맞는지.
+    /// CLI 값은 틀린 채 남을 수 있어서(layout 참고) 화면을 기준으로 확인한다. 화면 기록 권한이 필요하다.
+    struct ScreenCheck {
+        struct Split {
+            let vertical: Bool
+            /// 창 왼쪽 위 기준 포인트
+            let expected: CGFloat
+            let found: CGFloat?
+        }
+
+        let splits: [Split]
+        let tolerance: CGFloat
+        var mismatched: [Split] { splits.filter { s in s.found.map { abs($0 - s.expected) > tolerance } ?? true } }
+        /// 경계선을 하나도 못 찾으면 색이 다르거나 창이 가려진 것이라 판단하지 않는다
+        var conclusive: Bool { splits.contains { $0.found != nil } }
+    }
+
+    static func checkOnScreen(window: Element, tab: VisibleTab, scale: CGFloat) -> ScreenCheck? {
         let config = Config.load()
-        let titleBar = config.titleBar
-            ? NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: .titled).height - 100
-            : 0
-        let contentH = f.height - titleBar
-        let left = config.padding("left", cell: cellW, window: f.width, pixelScale: scale, defaultCells: 1)
-        let top = config.padding("top", cell: cellH, window: contentH, pixelScale: scale, defaultCells: 0.5)
-        let bottom = config.padding("bottom", cell: cellH, window: contentH, pixelScale: scale, defaultCells: 0.5)
-        var tabBar: CGFloat = 0
-        if config.tabBarOnTop(tabs: tabCount) {
-            // 탭 바 높이는 글꼴에 따라 달라서 남는 높이에서 추정한다 (아래 나머지는 한 칸 미만이므로 반 칸으로 본다)
-            tabBar = max(0, contentH - top - bottom - totalH - cellH / 2)
+        guard tab.panes.count > 1,
+              let layout = layout(tab.panes, tabCount: tab.tabCount, window: window.frame, scale: scale, config: config),
+              let id = AX.windowID(window.ref),
+              let image = captureWindow(id, size: window.frame.size, scale: scale) else { return nil }
+        let px = CGFloat(image.width) / window.frame.width
+        let lines = splitLines(in: image, color: config.splitColor ?? (0x44, 0x44, 0x44))
+        var expected: [(vertical: Bool, at: CGFloat)] = []
+        for p in tab.panes {
+            // 경계선은 두 패널 사이 한 칸의 가운데에 그려진다
+            if p.left_col > 0 { expected.append((true, layout.origin.x - window.frame.minX + (CGFloat(p.left_col) - 0.5) * layout.cellW)) }
+            if p.top_row > 0 { expected.append((false, layout.origin.y - window.frame.minY + (CGFloat(p.top_row) - 0.5) * layout.cellH)) }
         }
-        let originX = f.minX + left
-        let originY = f.minY + titleBar + tabBar + top
-        return tab.map {
-            (CGRect(x: originX + CGFloat($0.left_col) * cellW, y: originY + CGFloat($0.top_row) * cellH,
-                    width: CGFloat($0.size.cols) * cellW, height: CGFloat($0.size.rows) * cellH), $0)
+        var seen = Set<String>()
+        let splits = expected.filter { seen.insert("\($0.vertical)\(Int($0.at.rounded()))").inserted }.map { e in
+            let found = (e.vertical ? lines.xs : lines.ys).map { $0 / px }.min { abs($0 - e.at) < abs($1 - e.at) }
+            return ScreenCheck.Split(vertical: e.vertical, expected: e.at, found: found)
         }
+        return ScreenCheck(splits: splits, tolerance: max(2, min(layout.cellW, layout.cellH) / 2))
+    }
+
+    /// 이미지에서 split 색으로 길게(이미지 길이의 1/5 이상) 이어진 세로·가로 줄의 가운데(이미지 픽셀).
+    static func splitLines(in image: CGImage, color c: (Int, Int, Int), tolerance: Int = 48) -> (xs: [CGFloat], ys: [CGFloat]) {
+        let w = image.width, h = image.height
+        guard w > 0, h > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data else { return ([], []) }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let buf = data.bindMemory(to: UInt8.self, capacity: w * h * 4)
+        func hit(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * w + x) * 4
+            return abs(Int(buf[i]) - c.0) <= tolerance && abs(Int(buf[i + 1]) - c.1) <= tolerance
+                && abs(Int(buf[i + 2]) - c.2) <= tolerance
+        }
+        func longestRun(_ n: Int, _ at: (Int) -> Bool) -> Int {
+            var best = 0, run = 0
+            for i in 0..<n {
+                run = at(i) ? run + 1 : 0
+                best = max(best, run)
+            }
+            return best
+        }
+        /// 붙어 있는 줄 번호를 묶어 가운데를 낸다
+        func centers(_ hits: [Int]) -> [CGFloat] {
+            var out: [CGFloat] = []
+            var group: [Int] = []
+            for i in hits {
+                if let last = group.last, i != last + 1 {
+                    out.append(CGFloat(group.first! + group.last!) / 2 + 0.5)
+                    group = []
+                }
+                group.append(i)
+            }
+            if !group.isEmpty { out.append(CGFloat(group.first! + group.last!) / 2 + 0.5) }
+            return out
+        }
+        let xs = (0..<w).filter { x in longestRun(h) { hit(x, $0) } >= max(40, h / 5) }
+        let ys = (0..<h).filter { y in longestRun(w) { hit($0, y) } >= max(40, w / 5) }
+        return (centers(xs), centers(ys))
+    }
+
+    /// 창 하나를 (다른 창에 가려져 있어도) 찍는다. 3초 안에 못 찍으면 nil.
+    private static func captureWindow(_ id: CGWindowID, size: CGSize, scale: CGFloat) -> CGImage? {
+        guard #available(macOS 14.0, *) else { return nil }
+        let done = DispatchSemaphore(value: 0)
+        var result: CGImage?
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { content, _ in
+            guard let window = content?.windows.first(where: { $0.windowID == id }) else {
+                done.signal()
+                return
+            }
+            let config = SCStreamConfiguration()
+            config.width = Int(size.width * scale)
+            config.height = Int(size.height * scale)
+            config.showsCursor = false
+            SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window),
+                                             configuration: config) { image, _ in
+                result = image
+                _ = done.signal()
+            }
+        }
+        _ = done.wait(timeout: .now() + 3)
+        return result
+    }
+
+    /// 같은 내용은 한 번만 로그에 남긴다(스크롤 모드를 열 때마다 쌓이지 않게)
+    private static var noted = Set<String>()
+    private static let noteLock = NSLock()
+
+    private static func note(_ line: String) {
+        noteLock.lock()
+        let fresh = noted.insert(line).inserted
+        noteLock.unlock()
+        if fresh { Log.write(line) }
     }
 
     /// ~/.wezterm.lua 에서 배치에 필요한 설정만 읽는다. 주석 줄은 빼고, 같은 설정이 여러 번이면 마지막 것.
     struct Config {
-        private let text: String
+        let text: String
 
         static func load() -> Config {
             let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -219,6 +418,12 @@ enum WezTerm {
             case "%": return CGFloat(n) / 100 * window
             default: return CGFloat(n) / pixelScale
             }
+        }
+
+        /// colors 의 split = '#rrggbb' (패널 경계선 색)
+        var splitColor: (Int, Int, Int)? {
+            guard let hex = last(##"split\s*=\s*['"]#([0-9a-fA-F]{6})['"]"##)?[1], let v = Int(hex, radix: 16) else { return nil }
+            return ((v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff)
         }
 
         /// 기본값은 macOS 제목 막대가 있는 'TITLE | RESIZE'

@@ -1,0 +1,14 @@
+{
+  "note": "2배(Retina) 화면, CLI 값이 맞는 경우. 픽셀 값과 여백(6px = 3pt)을 배율로 나눠야 함",
+  "window": [402, 257, 1314, 707],
+  "scale": 2,
+  "tabCount": 1,
+  "config": "config.window_decorations = 'RESIZE'\nconfig.window_padding = { left = 6, right = 6, top = 6, bottom = 4 }\nconfig.hide_tab_bar_if_only_one_tab = true",
+  "panes": [
+    {"pane_id": 1, "window_id": 0, "tab_id": 0, "left_col": 0, "top_row": 0, "is_active": true, "title": "a", "window_title": "w",
+     "size": {"rows": 41, "cols": 65, "pixel_width": 910, "pixel_height": 1394, "dpi": 144}},
+    {"pane_id": 2, "window_id": 0, "tab_id": 0, "left_col": 66, "top_row": 0, "is_active": false, "title": "b", "window_title": "w",
+     "size": {"rows": 41, "cols": 120, "pixel_width": 1680, "pixel_height": 1394, "dpi": 144}}
+  ],
+  "expect": {"1": [405, 260, 455, 697], "2": [867, 260, 840, 697]}
+}

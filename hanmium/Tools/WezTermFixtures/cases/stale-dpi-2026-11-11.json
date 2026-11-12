@@ -1,0 +1,16 @@
+{
+  "note": "1배 외부 모니터 하나인데 CLI 가 가로 픽셀만 2배로, dpi 는 패널마다 72·144 로 알려 줌. 노트북 화면을 오간 뒤 남은 값. 기대값은 화면의 노란 경계선(x=240, y=439)으로 확인함",
+  "window": [408, 222, 1041, 707],
+  "scale": 1,
+  "tabCount": 1,
+  "config": "config.window_decorations = 'RESIZE'\nconfig.window_padding = { left = 6, right = 6, top = 6, bottom = 4 }\nconfig.hide_tab_bar_if_only_one_tab = true",
+  "panes": [
+    {"pane_id": 5, "window_id": 0, "tab_id": 0, "left_col": 0, "top_row": 0, "is_active": false, "title": "a", "window_title": "w",
+     "size": {"rows": 41, "cols": 33, "pixel_width": 462, "pixel_height": 697, "dpi": 72}},
+    {"pane_id": 10, "window_id": 0, "tab_id": 0, "left_col": 34, "top_row": 0, "is_active": true, "title": "b", "window_title": "w",
+     "size": {"rows": 25, "cols": 113, "pixel_width": 1582, "pixel_height": 425, "dpi": 144}},
+    {"pane_id": 13, "window_id": 0, "tab_id": 0, "left_col": 34, "top_row": 26, "is_active": false, "title": "c", "window_title": "w",
+     "size": {"rows": 15, "cols": 113, "pixel_width": 1582, "pixel_height": 255, "dpi": 144}}
+  ],
+  "expect": {"5": [414, 228, 231, 697], "10": [652, 228, 791, 425], "13": [652, 670, 791, 255]}
+}

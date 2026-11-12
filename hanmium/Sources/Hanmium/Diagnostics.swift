@@ -79,6 +79,21 @@ enum Diagnostics {
                     add(.warn, "WezTerm 분할 창 \(expected)개 중 \(areas.filter { $0.wezTermPane != nil }.count)개만 찾았습니다")
                 } else if expected > 1 {
                     add(.ok, "WezTerm 분할 창 \(expected)개 모두 찾음")
+                    // 계산한 위치가 WezTerm 이 실제로 그린 경계선과 맞는지 화면으로 확인한다
+                    let window = scroll.windows[fw]
+                    if let tab, let check = WezTerm.checkOnScreen(
+                        window: window, tab: tab, scale: WezTerm.ScreenScales.current().scale(for: window.frame)) {
+                        if !check.conclusive {
+                            add(.info, "화면에서 WezTerm 경계선을 찾지 못해 위치는 확인하지 못했습니다 (split 색이 다르거나 창이 가려짐)")
+                        } else if check.mismatched.isEmpty {
+                            add(.ok, "WezTerm 경계선 \(check.splits.count)개가 화면과 맞음")
+                        } else {
+                            let off = check.mismatched.map { s in
+                                "\(s.vertical ? "세로" : "가로") 예상 \(Int(s.expected))pt → 화면 \(s.found.map { "\(Int($0))pt" } ?? "없음")"
+                            }
+                            add(.warn, "WezTerm 경계선이 화면과 어긋남: " + off.joined(separator: ", "))
+                        }
+                    }
                 } else if tab == nil {
                     add(.warn, "이 창과 짝이 되는 WezTerm 창을 CLI 에서 찾지 못했습니다")
                 }

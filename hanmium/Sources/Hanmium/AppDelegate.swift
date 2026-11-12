@@ -13,7 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchMode: ModeKind?
     private var current: Mode?
     private var currentKind: ModeKind?
-    private var building = false
+    /// 띄우려고 찾는 중인 openToken. 그 결과가 오면(버리게 되더라도) 비운다. 찾는 중에 그만둬서 openToken 이 바뀌어도
+    /// 그 결과가 비우므로 '찾는 중'에 갇히지 않는다.
+    private var buildingToken: Int?
+    private var building: Bool { buildingToken != nil }
     /// 스크롤 모드를 연 뒤로 이어지는 흐름. f 로 라벨을 띄웠다가 Esc 로 돌아오고, 라벨을 눌러 옮겨 가거나 앱·창·탭·데스크톱을
     /// 바꿔도 옮겨 간 곳에 스크롤 모드를 다시 연다. 스크롤 모드의 Esc·Enter, 마우스 클릭, 스크롤 단축키, 입력칸으로 가면 끝난다.
     private var scrollSession = false
@@ -24,6 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openToken = 0
     /// 지난 영역(ScrollCache)으로 먼저 띄운 스크롤 모드와 그 영역. 새로 찾은 결과가 오면 그대로 둘지 바꿀지 정한다.
     private var provisional: (mode: ScrollMode, snapshot: ScrollSnapshot)?
+    /// 라벨 모드가 떠 있는 동안 뒤에서 미리 찾아 둔 스크롤 영역(라벨에서 j 로 바로 띄우려고).
+    /// token 은 그 라벨 모드를 연 openToken, windowID 는 찾을 때 그 앱의 맨 앞 창.
+    private var prewarmed: (token: Int, windowID: CGWindowID?, snapshot: ScrollSnapshot)?
+    private let prewarmQueue = DispatchQueue(label: "Hanmium.prewarm", qos: .userInitiated)
+    /// 미리 찾은 영역이 없을 때 j·k 로 넘어가는 동안, 스크롤 모드가 뜰 때까지 숨겨 두고 키 포커스를 쥐고 있는 라벨 모드
+    private var handoff: ClickMode?
+    /// 라벨에서 스크롤 모드로 넘어간 j·k. 스크롤 모드가 뜰 때 아직 누르고 있으면 이어서 스크롤한다.
+    private var heldKey: NSEvent?
     /// 라벨을 누르거나 단축키를 넘기기 직전 앞 앱의 키 포커스. 그 뒤 '새' 입력칸으로 갔는지 볼 때 쓴다(typing).
     private var focusBefore: AXUIElement?
     /// 누른 것이 연 메뉴가 닫히기를 기다리는 동안 마우스 누름을 지켜보는 것 (waitForPopup)
@@ -163,11 +174,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.refreshButton()
     }
 
-    /// 같은 모드 단축키를 다시 누르면 닫고, 다른 모드면 바꿔 띄운다.
+    /// 같은 모드 단축키를 다시 누르면 닫고, 다른 모드면 바꿔 띄운다. 단, 스크롤 모드에서 누른 라벨 단축키는 닫기다:
+    /// 스크롤 모드에서 라벨은 f 로 띄우고, 라벨 단축키를 Tab 같은 키에 걸어 쓰면 그 키가 어느 모드에서나 '닫기'가 된다.
+    /// 닫을 때는 스크롤 이어 쓰기도 끝낸다. f 로 띄운 라벨에서 눌러도 스크롤 모드로 돌아가지 않는다.
     func toggle(_ kind: ModeKind) {
+        heldKey = nil
+        // j·k 로 스크롤 모드를 여는 중: 스크롤 단축키면 그대로 기다리고, 다른 단축키면 둘 다 그만둔다(onExit)
+        if handoff != nil {
+            if kind != .scroll {
+                scrollSession = false
+                current?.stop()
+            }
+            return
+        }
         if let mode = current {
-            if currentKind == kind {
-                if kind == .scroll { scrollSession = false }
+            if currentKind == kind || kind == .labels && currentKind == .scroll {
+                scrollSession = false
                 mode.stop()
                 return
             }
@@ -194,7 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// timed: 단축키로 열 때 여기서 시간 재기를 시작한다. 다시 열 때는 다시 열기를 부른 때부터 잰다(reopenScroll).
-    private func open(_ kind: ModeKind, timed: Bool = true) {
+    /// ready: 라벨 모드에서 미리 찾아 둔 스크롤 영역. 찾기를 기다리지 않고 바로 띄우고, 새로 찾기는 뒤에서 한다.
+    private func open(_ kind: ModeKind, timed: Bool = true, ready: ScrollSnapshot? = nil) {
         guard !building else { return }
         guard AXIsProcessTrusted() else {
             NSSound.beep()
@@ -203,23 +226,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let front = NSWorkspace.shared.frontmostApplication else { return }
         if kind == .labels { Timing.begin("라벨 모드 [\(front.localizedName ?? "?")]") }
         if kind == .scroll && timed { Timing.begin("스크롤 모드 [\(front.localizedName ?? "?")]") }
-        // 라벨을 찾는 동안 유리 라벨이 굴절시킬 화면을 찍어둔다 (오버레이가 뜨기 전)
-        if kind != .search { GlassSnapshots.retake() }
-        building = true
+        // 라벨을 찾는 동안 유리 라벨이 굴절시킬 화면을 찍어둔다 (오버레이가 뜨기 전).
+        // 라벨에서 바로 넘어갈 때는 라벨이 아직 떠 있어서 찍지 않고, 라벨을 열 때 찍은 것을 그대로 쓴다.
+        if kind != .search && ready == nil && handoff == nil { GlassSnapshots.retake() }
         openToken += 1
         provisional = nil
+        prewarmed = nil
         let token = openToken
+        buildingToken = token
         let builder = TreeBuilder.forFrontmost(front)
+        let scrollBuilder = kind == .labels ? TreeBuilder.forFrontmost(front) : nil
         let pid = front.processIdentifier
+        if let ready {
+            Timing.mark("미리 찾은 영역으로 [\(ready.bundleID ?? "?")] (\(ready.areas.count)개)")
+            buildingToken = nil
+            presentScroll(ready, cached: true)
+            if let mode = current as? ScrollMode { provisional = (mode, ready) }
+        }
         axQueue.async {
             switch kind {
             case .scroll:
-                if let cached = ScrollCache.reusable(for: pid) {
+                if ready == nil, let cached = ScrollCache.reusable(for: pid) {
                     DispatchQueue.main.async {
                         guard token == self.openToken else { return }
                         Timing.mark("지난 영역으로 먼저 [\(cached.bundleID ?? "?")] (\(cached.areas.count)개)")
                         // 띄운 뒤로는 다른 모드를 열 수 있다(그러면 openToken 이 바뀌어 새로 찾은 결과는 버린다)
-                        self.building = false
+                        if self.buildingToken == token { self.buildingToken = nil }
                         self.presentScroll(cached, cached: true)
                         if let mode = self.current as? ScrollMode { self.provisional = (mode, cached) }
                     }
@@ -227,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let snapshot = builder.scrollSnapshot()
                 ScrollCache.store(snapshot)
                 DispatchQueue.main.async {
+                    if self.buildingToken == token { self.buildingToken = nil }
                     guard token == self.openToken else { return }
                     if let shown = self.provisional {
                         self.provisional = nil
@@ -239,17 +272,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Log.write("새로 찾은 스크롤 영역이 지난 것과 달라서 바꿈")
                         self.replace(shown.mode)
                     }
-                    self.building = false
                     self.presentScroll(snapshot)
                 }
             case .labels, .search:
                 let snapshot = builder.clickSnapshot()
                 DispatchQueue.main.async {
                     Timing.mark("대상 찾기(\(snapshot.elements.count)개)")
-                    self.building = false
+                    if self.buildingToken == token { self.buildingToken = nil }
                     guard token == self.openToken else { return }
                     self.presentClick(kind, snapshot)
                     ExtrasCache.refreshIfStale()
+                    if let scrollBuilder, self.currentKind == .labels { self.prewarmScroll(scrollBuilder, token: token) }
                 }
             }
         }
@@ -262,12 +295,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let screen = Screens.screen(for: snapshot.anchor)
-        install(ClickMode(targets: snapshot.elements, kind: kind == .search ? .search : .labels, screen: screen), kind)
+        let mode = ClickMode(targets: snapshot.elements, kind: kind == .search ? .search : .labels, screen: screen)
+        mode.onScroll = { [weak self, weak mode] event in
+            guard let self, let mode else { return }
+            Timing.begin("스크롤 모드 [\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")] (라벨에서 \(event.charactersIgnoringModifiers ?? "?"))")
+            heldKey = event
+            if let ready = readyScroll() {
+                // 스크롤 창이 먼저 떠서 키 포커스를 넘겨받은 뒤 라벨 창을 닫는다
+                open(.scroll, timed: false, ready: ready)
+                replace(mode)
+            } else {
+                // 찾는 동안 라벨은 숨기고 키 포커스는 쥐고 있다가, 스크롤 모드가 뜨면 닫는다(presentScroll)
+                mode.hideForHandoff()
+                handoff = mode
+                open(.scroll, timed: false)
+                if !building { endHandoff() }  // 열지 못했다
+            }
+        }
+        install(mode, kind)
+    }
+
+    /// 라벨이 뜬 뒤 뒤에서 스크롤 영역을 미리 찾아 둔다. 라벨에서 j 를 누를 때 찾으면 느리다: 라벨 창을 닫으면 키 포커스가
+    /// 앱으로 돌아갔다가 곧 스크롤 창으로 다시 오는데, 그 사이 앱이 포커스를 받고 잃느라 바빠서 묻는 것마다 늦게 답한다
+    /// (WezTerm 은 Claude Code 같은 프로그램이 다시 그려서 0.3~1.5초). 미리 찾아 두면 스크롤 창을 먼저 띄운 뒤
+    /// 라벨 창을 닫아서 키 포커스가 앱으로 돌아가지도 않는다.
+    private func prewarmScroll(_ builder: TreeBuilder, token: Int) {
+        prewarmQueue.async {
+            let snapshot = builder.scrollSnapshot()
+            let windowID = snapshot.windows.indices.contains(snapshot.focusedWindow)
+                ? AX.windowID(snapshot.windows[snapshot.focusedWindow].ref) : nil
+            ScrollCache.store(snapshot)
+            DispatchQueue.main.async {
+                guard token == self.openToken, self.currentKind == .labels, !snapshot.areas.isEmpty else { return }
+                self.prewarmed = (token, windowID, snapshot)
+            }
+        }
+    }
+
+    /// 숨겨 두고 기다리던 라벨 모드를 닫는다(스크롤 모드가 떴거나 열지 못했을 때)
+    private func endHandoff() {
+        guard let mode = handoff else { return }
+        handoff = nil
+        replace(mode)
+    }
+
+    /// 미리 찾아 둔 스크롤 영역을 지금 쓸 수 있는지: 떠 있는 라벨 모드에서 찾은 것이고, 그 앱의 맨 앞 창이 그대로다.
+    /// 앱에 묻지 않고 창 서버 목록만 본다. 영역 요소가 바뀌었으면 뒤에서 새로 찾은 결과로 바꾼다(open).
+    private func readyScroll() -> ScrollSnapshot? {
+        guard let p = prewarmed, p.token == openToken, let id = p.windowID,
+              WindowStack.current().entries.first(where: { $0.pid == p.snapshot.pid })?.id == id else { return nil }
+        return p.snapshot
     }
 
     /// cached: 지난 영역(ScrollCache)으로 먼저 띄우는 것
     private func presentScroll(_ snapshot: ScrollSnapshot, cached: Bool = false) {
         guard !snapshot.areas.isEmpty else {
+            endHandoff()
             // 흐름 중이면 옮겨 간 페이지를 아직 그리는 중일 수 있어서 조금 더 기다려 본다
             if scrollSession, emptyRetries < 3 {
                 emptyRetries += 1
@@ -293,6 +376,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mode.onStale = { [weak self] in self?.reopenScroll(after: 0.05) }
         scrollSession = true
         install(mode, .scroll)
+        endHandoff()
+        // 라벨에서 j·k 를 누른 채 넘어왔으면 이어서 스크롤한다
+        if let held = heldKey {
+            if CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(held.keyCode)) {
+                mode.continuePress(held)
+            } else {
+                heldKey = nil
+            }
+        }
     }
 
     /// 스크롤 모드에서 누른 ⌘·⌃ 단축키(탭 바꾸기 등): 스크롤 모드를 닫아 키 포커스를 앱에 돌려준 뒤 같은 키를 보내고,
@@ -426,6 +518,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         endPopupWait()
         mode.onExit = { [weak self, weak mode] in
             guard let self, let mode, self.current === mode else { return }
+            if let handoff, handoff === mode {
+                // 스크롤 모드가 뜨기 전에 그만뒀다(마우스 누름, 앱 바뀜, 단축키): 찾던 것은 버린다
+                self.handoff = nil
+                openToken += 1
+            }
             self.current = nil
             self.currentKind = nil
             removeCancelWatchers()

@@ -69,8 +69,12 @@ enum Config {
     /// 빌드한 실행 파일을 바로 실행할 때만 이름을 지정해서 같은 설정을 쓴다.
     static let defaults = Bundle.main.bundleIdentifier == "com.local.Hanmium"
         ? UserDefaults.standard : UserDefaults(suiteName: "com.local.Hanmium") ?? .standard
-    /// Vimium 의 기본 라벨 문자(linkHintCharacters)와 같다
-    static let defaultLabelCharacters = "sadfjklewcmpgh"
+    /// Vimium 의 기본 라벨 문자(linkHintCharacters)에서 스크롤 모드로 바꾸는 j·k 를 뺐다
+    static let defaultLabelCharacters = "sadflewcmpgh"
+    /// 라벨 모드에서 다른 모드로 바꾸는 키. 라벨 문자로 쓰지 않는다.
+    /// j·k 는 스크롤 모드로 바꾸면서 그 키를 스크롤 모드에서 누른 것으로 이어 간다(누르고 있으면 계속 스크롤).
+    static let labelToSearchKey: Character = "/"
+    static let labelToScrollKeys: Set<Character> = ["j", "k"]
     static let defaultScrollKeys = "hjkl"
     static let defaultScrollPxPerMs = 1.2
     static let defaultDashMultiplier = 3.0
@@ -104,11 +108,12 @@ enum Config {
     static func hotkey(for kind: ModeKind) -> String { defaults.string(forKey: kind.hotkeyKey) ?? kind.defaultHotkey }
     static func isEnabled(_ kind: ModeKind) -> Bool { defaults.object(forKey: kind.enabledKey) as? Bool ?? true }
 
-    /// 라벨에 쓸 문자. '/' 는 검색 전환 키라서 뺀다. 두 글자 미만이면 기본값.
+    /// 라벨에 쓸 문자. '/'(검색으로)·'j'·'k'(스크롤로)는 모드를 바꾸는 키라서 뺀다. 두 글자 미만이면 기본값.
     static var labelAlphabet: [Character] {
         let raw = defaults.string(forKey: "labelCharacters") ?? defaultLabelCharacters
         var seen = Set<Character>()
-        let chars = Array(raw.lowercased().filter { $0 != "/" && !$0.isWhitespace && seen.insert($0).inserted })
+        let reserved = labelToScrollKeys.union([labelToSearchKey])
+        let chars = Array(raw.lowercased().filter { !reserved.contains($0) && !$0.isWhitespace && seen.insert($0).inserted })
         return chars.count >= 2 ? chars : Array(defaultLabelCharacters)
     }
 

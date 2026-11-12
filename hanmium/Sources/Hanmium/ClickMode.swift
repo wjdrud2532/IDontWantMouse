@@ -3,13 +3,17 @@ import AppKit
 /// 라벨을 입력하거나(labels) 텍스트로 검색해서(search) 요소를 골라 클릭한다.
 ///
 /// 라벨 모드: 라벨 입력 → 왼쪽 클릭. 마지막 글자를 Shift 와 함께 → 오른쪽 클릭,
-///           Cmd → Cmd-클릭(새 탭), Option → 더블클릭. Backspace 로 지우기, '/' 로 검색 전환.
+///           Cmd → Cmd-클릭(새 탭), Option → 더블클릭. Backspace 로 지우기, '/' 로 검색 전환, 'j'·'k' 로 스크롤 모드(onScroll).
 /// 검색 모드: 제목·설명·값으로 찾기. Tab/↓ 다음, Shift-Tab/↑ 이전, Return 클릭
 ///           (Shift-Return 오른쪽, Cmd-Return Cmd-클릭, Option-Return 더블클릭).
 final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     enum Kind { case labels, search }
 
     var onExit: (() -> Void)?
+    /// 라벨 모드에서 j·k: 스크롤 모드로 바꾸고 그 키를 스크롤 모드에 넘긴다
+    var onScroll: ((NSEvent) -> Void)?
+    /// 스크롤 모드가 뜨기를 기다리는 중: 보이지 않게 하고 키 포커스만 쥐고 있다(hideForHandoff)
+    private var handingOff = false
     /// 눌러서 닫혔으면 누른 대상 (Esc 로 닫았으면 nil)
     private(set) var clicked: Element?
     private let targets: [Element]
@@ -38,6 +42,13 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
         overlay.onKeyDown = { [unowned self] event in keyDown(event) }
         overlay.show()
         if kind == .search { showSearchField() }
+    }
+
+    /// 스크롤 모드가 뜰 때까지: 라벨은 지우고 키 포커스는 쥐고 있는다. 닫으면 키 포커스가 앱으로 가서, j·k 를 누르고
+    /// 있는 동안 반복 입력이 앱에 글자로 들어가고 앱도 포커스를 받고 잃느라 늦게 답한다.
+    func hideForHandoff() {
+        handingOff = true
+        overlay.hideKeepingKey()
     }
 
     func stop() {
@@ -71,6 +82,7 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     // MARK: 라벨 모드
 
     private func keyDown(_ event: NSEvent) {
+        if handingOff { return }
         switch event.keyCode {
         case 53:  // Esc
             stop()
@@ -85,8 +97,13 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
             break
         }
         guard let c = KeyTranslator.character(for: event.keyCode) else { return }
-        if c == "/" {
+        if c == Config.labelToSearchKey {
             switchToSearch()
+            return
+        }
+        if Config.labelToScrollKeys.contains(c), let onScroll,
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            onScroll(event)
             return
         }
         guard alphabet.contains(c) else {

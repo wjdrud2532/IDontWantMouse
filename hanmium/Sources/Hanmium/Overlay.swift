@@ -103,6 +103,11 @@ final class Overlay {
         canvases.forEach { $0.needsDisplay = true }
     }
 
+    /// 보이지 않게만 한다. 키 포커스는 그대로(다음 오버레이가 받아 갈 때까지).
+    func hideKeepingKey() {
+        panels.forEach { $0.alphaValue = 0 }
+    }
+
     func close() {
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()

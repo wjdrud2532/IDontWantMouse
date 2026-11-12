@@ -1,0 +1,14 @@
+{
+  "note": "1배 화면, CLI 값이 맞는 보통 경우 (분할 2개)",
+  "window": [402, 257, 1314, 707],
+  "scale": 1,
+  "tabCount": 1,
+  "config": "config.window_decorations = 'RESIZE'\nconfig.window_padding = { left = 6, right = 6, top = 6, bottom = 4 }\nconfig.hide_tab_bar_if_only_one_tab = true",
+  "panes": [
+    {"pane_id": 5, "window_id": 0, "tab_id": 0, "left_col": 0, "top_row": 0, "is_active": false, "title": "a", "window_title": "w",
+     "size": {"rows": 41, "cols": 65, "pixel_width": 455, "pixel_height": 697, "dpi": 72}},
+    {"pane_id": 7, "window_id": 0, "tab_id": 0, "left_col": 66, "top_row": 0, "is_active": true, "title": "b", "window_title": "w",
+     "size": {"rows": 41, "cols": 120, "pixel_width": 840, "pixel_height": 697, "dpi": 72}}
+  ],
+  "expect": {"5": [408, 263, 455, 697], "7": [870, 263, 840, 697]}
+}

@@ -50,6 +50,8 @@ final class TreeBuilder {
     private let screenBounds: CGRect
     private let extraPids: [pid_t]
     private let dockPid: pid_t?
+    /// WezTerm 패널 배치에 쓰는 화면 배율 (메인 스레드에서 읽은 것)
+    private let screenScales: WezTerm.ScreenScales
 
     private var targets: [Element] = []
     private var seenFrames = Set<FrameKey>()
@@ -66,10 +68,12 @@ final class TreeBuilder {
         let dockPid = apps.first { $0.bundleIdentifier == "com.apple.dock" }?.processIdentifier
         return TreeBuilder(pid: running.processIdentifier, bundleID: running.bundleIdentifier,
                            screenBounds: Screens.axUnion, extraPids: extraPids,
-                           dockPid: dockHidden ? nil : dockPid)
+                           dockPid: dockHidden ? nil : dockPid, screenScales: .current())
     }
 
-    init(pid: pid_t, bundleID: String?, screenBounds: CGRect, extraPids: [pid_t], dockPid: pid_t?) {
+    init(pid: pid_t, bundleID: String?, screenBounds: CGRect, extraPids: [pid_t], dockPid: pid_t?,
+         screenScales: WezTerm.ScreenScales = .current()) {
+        self.screenScales = screenScales
         self.pid = pid
         self.bundleID = bundleID
         self.app = AXUIElementCreateApplication(pid)
@@ -113,11 +117,18 @@ final class TreeBuilder {
             snap.anchor = w?.frame
             walk(window, clip: screenBounds, depth: 0, owner: nil)
             profile.mark("창 훑기")
+            // 키 창 위에 떠 있는 같은 앱 창(Outlook 미리 알림 같은 패널)은 키 창이 아니라서 위에서 빠진다.
+            // 뒤에서 앞 순서로, 가려진 대상은 빼고 그 창을 훑는다.
+            for front in windowsAbove(window) {
+                targets.removeAll { front.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+                walk(front.ref, clip: screenBounds, depth: 0, owner: nil)
+            }
+            profile.mark("위에 뜬 창 훑기")
             // WezTerm 은 분할 패널을 AX 로 알려주지 않아서 wezterm cli 의 배치로 패널마다 라벨을 단다
             if bundleID == WezTerm.bundleID, let w {
                 let cli = wez?.wait() ?? (panes: WezTerm.panes(), focused: nil)
-                targets += WezTerm.paneElements(for: w, tab: WezTerm.visibleTabs(for: [w], in: cli.panes,
-                                                                                  focused: .some(cli.focused))[0])
+                let tab = WezTerm.visibleTabs(for: [w], in: cli.panes, focused: .some(cli.focused), scales: screenScales)[0]
+                targets += WezTerm.paneElements(for: w, tab: tab, scales: screenScales)
                 profile.mark("WezTerm 패널")
             }
         }
@@ -317,6 +328,37 @@ final class TreeBuilder {
         return (items, owners)
     }
 
+    /// 화면에서 키 창보다 앞에 보이는 같은 앱 창들, 뒤에서 앞 순서. 떠 있는 패널(레이어 3 등)은 키 창이 아니어도
+    /// 늘 일반 창 위에 있다. 메뉴·상태 아이콘 층(24~)은 따로 다루므로 뺀다.
+    private func windowsAbove(_ focused: AXUIElement) -> [(ref: AXUIElement, frame: CGRect)] {
+        guard let focusedID = AX.windowID(focused) else { return [] }
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        var above: [CGWindowID] = []
+        var reachedFocused = false
+        for w in info {
+            guard let id = w[kCGWindowNumber as String] as? CGWindowID else { continue }
+            if id == focusedID {
+                reachedFocused = true
+                break
+            }
+            guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  let layer = w[kCGWindowLayer as String] as? Int, (0..<24).contains(layer),
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { continue }
+            above.append(id)
+        }
+        guard reachedFocused, !above.isEmpty else { return [] }
+        var byID: [CGWindowID: AXUIElement] = [:]
+        for ref in AX.elements(AX.copy(app, kAXWindowsAttribute)) {
+            if let id = AX.windowID(ref) { byID[id] = ref }
+        }
+        return above.reversed().compactMap { id in
+            guard let ref = byID[id], let e = Element.fetch(ref, clip: screenBounds),
+                  e.frame.width > 0, e.frame.height > 0 else { return nil }
+            return (ref, e.frame)
+        }
+    }
+
     private func focusedWindow() -> AXUIElement? {
         AX.element(AX.copy(app, kAXFocusedWindowAttribute))
             ?? AX.element(AX.copy(app, kAXMainWindowAttribute))
@@ -351,9 +393,10 @@ final class TreeBuilder {
         let cli = wez?.wait() ?? (panes: [], focused: nil)
         if wez != nil { profile.mark("WezTerm 패널") }
         let wezPanes = cli.panes
-        let wezTabs = WezTerm.visibleTabs(for: snap.windows, in: wezPanes, focused: .some(cli.focused))
+        let wezTabs = WezTerm.visibleTabs(for: snap.windows, in: wezPanes, focused: .some(cli.focused),
+                                          scales: screenScales)
         for (i, w) in snap.windows.enumerated() {
-            var areas = WezTerm.paneElements(for: w, tab: wezTabs[i])
+            var areas = WezTerm.paneElements(for: w, tab: wezTabs[i], scales: screenScales)
             if areas.isEmpty { areas = scrollAreas(in: w.ref) }
             // Electron 앱은 AX 를 처음 켠 직후엔 웹 내용 트리가 비어 있다 (Claude 앱을 띄우고 처음 열면 창 전체 하나만 잡혔다).
             // 이 앱에서 처음 열 때만 잠깐씩 기다리며 다시 찾는다.
