@@ -144,6 +144,14 @@ final class ScrollMode: Mode {
 
     /// 라벨에서 j·k 를 누른 채 넘어왔을 때: 그 키를 이 모드에서 누른 것으로 이어 간다.
     /// 키를 뗀 입력은 넘어오는 사이에 다른 창으로 갔을 수 있어서 실제 키 상태를 보고 멈춘다.
+    /// 라벨에서 j·k 를 짧게 눌러 넘어왔는데 스크롤 모드가 뜰 때 이미 뗐으면: 여기서 짧게 누른 것처럼(0.08초) 옮긴다.
+    /// 그냥 두면 손을 떼는 시점에 따라 움직이기도 하고 안 움직이기도 한다.
+    func tapPress(_ event: NSEvent) {
+        keyDown(event)
+        let key = event.keyCode
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.driver.release(key) }
+    }
+
     func continuePress(_ event: NSEvent) {
         keyDown(event)
         let key = event.keyCode

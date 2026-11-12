@@ -395,6 +395,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(held.keyCode)) {
                 mode.continuePress(held)
             } else {
+                // 짧게 눌러 스크롤 모드가 뜨기 전에 뗐으면 스크롤 모드에서 한 번 누른 것처럼 조금만 옮긴다
+                mode.tapPress(held)
                 heldKey = nil
             }
         }

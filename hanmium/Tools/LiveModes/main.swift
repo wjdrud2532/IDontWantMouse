@@ -1,4 +1,4 @@
-// 라벨·스크롤 모드를 실제 키로 시험한다. Tools/live-modes.sh 로 돌린다 (20초쯤).
+// 라벨·스크롤 모드를 실제 키로 시험한다. Tools/live-modes.sh 로 돌린다 (20초쯤). 창 아래 막대에 진행 상황이 보인다.
 // 이 프로그램이 스크롤 영역 두 개(#a 왼쪽, #b 오른쪽)가 있는 시험 창을 띄워 앞으로 가져오고, 단축키와 모드 키를 HID 단계로 보낸다.
 // 결과는 Hanmium 로그, Hanmium 창 수, 시험 창 영역의 scrollTop, Hanmium 이 시험 창에 넘긴 단축키(⌘[ 등)로 확인한다.
 // 키를 보내기 전마다 앞 앱이 시험 창(또는 Hanmium)인지 보고, 아니거나 사용자의 진짜 입력이 섞이면 바로 멈춘다.
@@ -24,7 +24,9 @@ html,body{margin:0;height:100%;overflow:hidden;font:14px -apple-system}
 #a,#b{position:absolute;top:0;bottom:0;overflow:auto}
 #a{left:0;width:50%;background:#eef}#b{right:0;width:50%;background:#fee}
 p{margin:0;padding:6px 12px;height:22px}
-</style></head><body><div id="a"></div><div id="b"></div><script>
+</style></head><body>
+<!-- ScrollFixtures 페이지와 같이: WebKit 은 역할 없는 div 를 접근성 트리에 넣지 않고(role), Hanmium 은 웹의 스크롤 상자를 클래스 이름(overflow-y-auto 등)으로 알아본다 -->
+<div id="a" role="region" aria-label="a" class="overflow-y-auto"></div><div id="b" role="region" aria-label="b" class="overflow-y-auto"></div><script>
 for (const id of ['a', 'b']) {
   const d = document.getElementById(id)
   for (let i = 0; i < 400; i++) {
@@ -42,12 +44,32 @@ final class Loader: NSObject, WKNavigationDelegate {
 }
 let loader = Loader()
 let screen = NSScreen.main!.visibleFrame
-let win = NSWindow(contentRect: NSRect(x: screen.midX - 450, y: screen.midY - 320, width: 900, height: 640),
+let barHeight: CGFloat = 54
+let win = NSWindow(contentRect: NSRect(x: screen.midX - 450, y: screen.midY - 340, width: 900, height: 640 + barHeight),
                    styleMask: [.titled], backing: .buffered, defer: false)
 win.title = "Hanmium 모드 시험"
-let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 900, height: 640))
+let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 640 + barHeight))
+let web = WKWebView(frame: NSRect(x: 0, y: barHeight, width: 900, height: 640))
 web.navigationDelegate = loader
-win.contentView = web
+root.addSubview(web)
+
+// 아래 진행 막대: 몇 번째 / 전체, 퍼센트, 통과·실패 수, 지금 하는 시험
+let bar = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: barHeight))
+bar.wantsLayer = true
+bar.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
+let progress = NSProgressIndicator(frame: NSRect(x: 14, y: 32, width: 872, height: 12))
+progress.style = .bar
+progress.isIndeterminate = false
+progress.minValue = 0
+let status = NSTextField(labelWithString: "준비 중…")
+status.frame = NSRect(x: 14, y: 8, width: 872, height: 18)
+status.font = .systemFont(ofSize: 12, weight: .medium)
+status.textColor = .white
+status.lineBreakMode = .byTruncatingTail
+bar.addSubview(progress)
+bar.addSubview(status)
+root.addSubview(bar)
+win.contentView = root
 web.loadHTMLString(html, baseURL: nil)
 
 // Hanmium 이 시험 창에 넘긴 단축키를 모은다(웹 보기에는 넘기지 않는다)
@@ -164,9 +186,51 @@ func tops() -> (a: Int, b: Int) {
 func resetTops() { _ = js("a.scrollTop = 0; b.scrollTop = 0; 1") }
 func takeReceived() -> [String] { recvLock.lock(); defer { received = []; recvLock.unlock() }; return received }
 
-var pass = 0, fail = 0
+/// 돌릴 시험 (진행 막대의 전체 수). 순서대로 begin 으로 시작하고 check 로 끝낸다.
+let plan = [
+    "⌥Space → 라벨 모드",
+    "라벨에서 j 꾹 → 스크롤 모드 + 계속 스크롤",
+    "스크롤 모드 Shift+H → 뒤로 (⌘[)",
+    "스크롤 모드 Shift+L → 앞으로 (⌘])",
+    "스크롤 모드 Shift+J → 앞 탭 (⌘⇧[)",
+    "스크롤 모드 Shift+K → 뒤 탭 (⌘⇧])",
+    "스크롤 모드 Shift+G → 맨 아래",
+    "스크롤 모드 gg → 맨 위",
+    "스크롤 모드 f → 라벨",
+    "라벨에서 2 → 영역으로 스크롤 모드",
+    "스크롤 모드에서 ⌥Space → 모두 닫힘",
+    "라벨에서 1 → 영역으로 스크롤 모드",
+    "번호 1·2 가 서로 다른 영역",
+    "스크롤 모드에서 Tab → 모두 닫힘",
+    "라벨에서 k 짧게 → 스크롤 모드 + 위로 조금",
+    "Esc → 닫힘",
+]
+var pass = 0, fail = 0, skipped = 0
+func showProgress(_ text: String) {
+    let done = Double(pass + fail + skipped)
+    DispatchQueue.main.async {
+        progress.maxValue = Double(plan.count)
+        progress.doubleValue = done
+        status.stringValue = text
+    }
+}
+func summary() -> String {
+    let done = pass + fail + skipped
+    return "\(done)/\(plan.count) · \(Int((Double(done) / Double(plan.count) * 100).rounded()))% · 통과 \(pass) · 실패 \(fail)"
+        + (skipped > 0 ? " · 건너뜀 \(skipped)" : "")
+}
+/// 시험 하나를 시작한다: 진행 막대에 이름을 띄운다
+func begin(_ name: String) {
+    showProgress("\(summary()) — 지금 \(pass + fail + skipped + 1)번째: \(name)")
+}
 func check(_ name: String, _ ok: Bool, _ detail: String) {
     if ok { pass += 1; print("✅ \(name): \(detail)") } else { fail += 1; print("❌ \(name): \(detail)") }
+    showProgress("\(summary()) — 방금: \(ok ? "✅" : "❌") \(name)")
+}
+func skip(_ name: String, _ why: String) {
+    skipped += 1
+    print("⏭  \(name): \(why)")
+    showProgress("\(summary()) — 건너뜀: \(name)")
 }
 /// 모드가 열려 있으면 Esc 로 닫는다(앞 앱이 시험 창일 때만)
 func closeAll() {
@@ -178,17 +242,19 @@ func closeAll() {
 
 // MARK: 시험
 
-let J: UInt16 = 38, K: UInt16 = 40, H: UInt16 = 4, L: UInt16 = 37, F: UInt16 = 3, TAB: UInt16 = 48
+let J: UInt16 = 38, K: UInt16 = 40, H: UInt16 = 4, L: UInt16 = 37, F: UInt16 = 3, G: UInt16 = 5, TAB: UInt16 = 48
 let digit: [Int: UInt16] = [1: 18, 2: 19]
 let labelLog = "라벨 모드 [", scrollLog = "스크롤 모드 열림 [", closeLog = "스크롤 모드 닫힘"
 
 func run() throws {
     // 1. ⌥Space → 라벨
+    begin(plan[0])
     var n = logCount(labelLog)
     try optSpace()
     check("⌥Space → 라벨 모드", waitLog(labelLog, after: n) && waitOverlays({ $0 > 0 }), lastLog(labelLog).components(separatedBy: "Z ").last ?? "")
 
     // 2. 라벨에서 j 를 누르고 있으면 스크롤 모드로 넘어가 계속 스크롤
+    begin(plan[1])
     resetTops()
     n = logCount(scrollLog)
     try hold(J, 0.9)
@@ -200,6 +266,7 @@ func run() throws {
     // 3~6. 스크롤 모드 Shift+h l j k → 앱에 ⌘[ ⌘] ⌘⇧[ ⌘⇧] 를 넘기고 스크롤 모드를 다시 연다
     for (key, name, want) in [(H, "Shift+H → 뒤로 (⌘[)", "⌘33"), (L, "Shift+L → 앞으로 (⌘])", "⌘30"),
                               (J, "Shift+J → 앞 탭 (⌘⇧[)", "⇧⌘33"), (K, "Shift+K → 뒤 탭 (⌘⇧])", "⇧⌘30")] {
+        begin("스크롤 모드 " + name)
         _ = takeReceived()
         n = logCount(scrollLog)
         try shifted(key)
@@ -209,7 +276,24 @@ func run() throws {
         check("스크롤 모드 " + name, got == [want] && reopened, "시험 창이 받은 키 \(got), 다시 열림 \(reopened)")
     }
 
-    // 7. 스크롤 모드 f → 라벨
+    // 7~8. 스크롤 모드 Shift+G → 지금 영역 맨 아래, gg → 맨 위
+    begin(plan[6])
+    resetTops()
+    wait(0.2)
+    try shifted(G)
+    wait(0.5)
+    let bottom = js("[a, b].map(e => e.scrollTop >= e.scrollHeight - e.clientHeight - 2 ? e.id : '').join('')")
+    t = tops()
+    check(plan[6], bottom == "a" || bottom == "b", "맨 아래에 닿은 영역 \(bottom.isEmpty ? "없음" : bottom) (a \(t.a) b \(t.b))")
+    begin(plan[7])
+    try tap(G); wait(0.12); try tap(G)
+    wait(0.5)
+    t = tops()
+    let topNow = bottom == "a" ? t.a : bottom == "b" ? t.b : -1
+    check(plan[7], topNow == 0, "그 영역 scrollTop \(topNow) (a \(t.a) b \(t.b))")
+
+    // 9. 스크롤 모드 f → 라벨
+    begin(plan[8])
     n = logCount(labelLog)
     try tap(F)
     check("스크롤 모드 f → 라벨", waitLog(labelLog, after: n), "")
@@ -218,6 +302,7 @@ func run() throws {
     var moved: [String] = []
     for (i, number) in [2, 1].enumerated() {
         if i > 0 {
+            begin(plan[10])
             try optSpace()  // 스크롤 모드에서 라벨 단축키 → 모두 닫힘
             check("스크롤 모드에서 ⌥Space → 모두 닫힘", waitOverlays({ $0 == 0 }), "")
             n = logCount(labelLog)
@@ -225,10 +310,13 @@ func run() throws {
             _ = waitLog(labelLog, after: n)
             wait(0.2)
         }
+        begin("라벨에서 \(number) → 영역으로 스크롤 모드")
         resetTops()
-        let c = logCount("라벨에서 \(number)번")
+        // ScrollMode.choose 의 줄만 센다("스크롤 모드 [앱] (라벨에서 2번)" 같은 시간 기록 줄과 헷갈리지 않게)
+        let chooseLog = "라벨에서 \(number)번 → 영역"
+        let c = logCount(chooseLog)
         try tap(digit[number]!)
-        let chose = waitLog("라벨에서 \(number)번", after: c)
+        let chose = waitLog(chooseLog, after: c)
         wait(0.3)
         try hold(J, 0.5)
         wait(0.3)
@@ -236,20 +324,23 @@ func run() throws {
         let area = t.a > 50 && t.b == 0 ? "a" : t.b > 50 && t.a == 0 ? "b" : "?"
         moved.append(area)
         check("라벨에서 \(number) → 영역으로 스크롤 모드", chose && area != "?",
-              "\(lastLog("라벨에서 \(number)번").components(separatedBy: "Z ").last ?? ""), 움직인 영역 \(area) (a \(t.a) b \(t.b))")
+              "\(chose ? lastLog(chooseLog).components(separatedBy: "Z ").last ?? "" : "번호를 골랐다는 로그 없음"), 움직인 영역 \(area) (a \(t.a) b \(t.b))")
     }
+    begin(plan[12])
     check("번호 1·2 가 서로 다른 영역", moved.count == 2 && moved[0] != moved[1] && !moved.contains("?"), "\(moved)")
 
     // 10. 키보드 규칙이 켜져 있으면 Tab(→ 라벨 단축키) 으로 스크롤 모드 닫기
+    begin(plan[13])
     if UserDefaults(suiteName: "com.local.Hanmium")?.bool(forKey: "keyboardEnabled") == true {
         try tap(TAB)
         check("스크롤 모드에서 Tab → 모두 닫힘", waitOverlays({ $0 == 0 }), "")
     } else {
-        print("⏭  Tab 시험 건너뜀 (키보드 규칙 꺼짐)")
+        skip(plan[13], "키보드 규칙 꺼짐")
         closeAll()
     }
 
-    // 11. 라벨에서 k → 스크롤 모드, Esc → 닫힘
+    // 15~16. 라벨에서 k 를 짧게 → 스크롤 모드로 넘어가 위로 조금, Esc → 닫힘
+    begin(plan[14])
     n = logCount(labelLog)
     try optSpace()
     _ = waitLog(labelLog, after: n)
@@ -260,10 +351,29 @@ func run() throws {
     let opened = waitLog(scrollLog, after: n)
     wait(0.4)
     t = tops()
-    check("라벨에서 k → 스크롤 모드 (위로)", opened && (t.a < 2000 || t.b < 2000), "a \(t.a) b \(t.b)")
+    check(plan[14], opened && (t.a < 2000 || t.b < 2000), "a \(t.a) b \(t.b)")
+    begin(plan[15])
     let c = logCount(closeLog)
     try tap(53)
     check("Esc → 닫힘", waitOverlays({ $0 == 0 }) && waitLog(closeLog, after: c), "")
+}
+
+// --bar-preview <png>: 키를 보내지 않고 다른 창 뒤에 창을 띄워 진행 막대 모습만 찍는다(막대를 고칠 때 확인용)
+if let i = CommandLine.arguments.firstIndex(of: "--bar-preview"), i + 1 < CommandLine.arguments.count {
+    let out = CommandLine.arguments[i + 1]
+    pass = 4; fail = 1
+    begin(plan[5])
+    win.orderBack(nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        p.arguments = ["-x", "-o", "-l", "\(win.windowNumber)", out]
+        try? p.run()
+        p.waitUntilExit()
+        print(out)
+        exit(0)
+    }
+    app.run()
 }
 
 DispatchQueue.global().async {
@@ -282,7 +392,9 @@ DispatchQueue.global().async {
     do { try run() } catch let e as Abort { aborted = e.why } catch { aborted = "\(error)" }
     if let aborted { print("🛑 멈춤: \(aborted)") }
     if onMain({ NSWorkspace.shared.frontmostApplication?.processIdentifier == myPID }) { closeAll() }
-    print("통과 \(pass) · 실패 \(fail)" + (aborted == nil ? "" : " · 중간에 멈춤"))
+    print("통과 \(pass) · 실패 \(fail)" + (skipped > 0 ? " · 건너뜀 \(skipped)" : "") + (aborted == nil ? "" : " · 중간에 멈춤"))
+    showProgress("끝 — \(summary())" + (aborted.map { " · 멈춤: \($0)" } ?? ""))
+    wait(1.5)  // 끝난 모습을 잠깐 보여 준다
     onMain { _ = previousApp?.activate() }
     wait(0.3)
     exit(fail == 0 && aborted == nil ? 0 : 1)
