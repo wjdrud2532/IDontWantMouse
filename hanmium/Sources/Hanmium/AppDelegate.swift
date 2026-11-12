@@ -337,6 +337,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (current as? ScrollMode)?.choose(number: n)
             replace(mode)
         }
+        // Shift + h·l·j·k: 스크롤 모드처럼 뒤로·앞으로, 앞·뒤 탭. 바뀐 화면에 라벨을 다시 띄운다.
+        mode.onHistory = { [weak self] back in self?.goHistory(back: back, then: .labels) }
+        mode.onTab = { [weak self] previous in
+            Log.write("\(previous ? "앞" : "뒤") 탭 (라벨) [\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?")]")
+            self?.passThrough(key: previous ? 33 : 30, flags: [.maskCommand, .maskShift], then: .labels)
+        }
         install(mode, kind)
         Timing.detail("창 띄움")
     }
@@ -432,7 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 스크롤 모드의 Shift+h·l: 앱의 뒤로·앞으로 단축키를 넘기고 바뀐 화면에 스크롤 모드를 다시 연다
-    private func goHistory(back: Bool) {
+    private func goHistory(back: Bool, then: ModeKind = .scroll) {
         let app = NSWorkspace.shared.frontmostApplication
         guard let keys = HistoryKeys.keys(for: app?.bundleIdentifier) else {
             NSSound.beep()  // 터미널처럼 뒤로·앞으로가 없는 앱
@@ -440,12 +446,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Log.write("\(back ? "뒤로" : "앞으로") [\(app?.bundleIdentifier ?? "?")]")
         let key = back ? keys.back : keys.forward
-        passThrough(key: key.code, flags: key.flags, afterShiftUp: true)
+        passThrough(key: key.code, flags: key.flags, afterShiftUp: true, then: then)
     }
 
     /// afterShiftUp: 누른 Shift 를 뗀 뒤에 보낸다(Shift+h·l). 아직 누르고 있으면 앱이 ⌘[ 를 ⌘⇧[(앞 탭)처럼,
     /// ⌃- 를 ⌃⇧-(앞으로)처럼 받을 수 있다. 0.6초 넘게 누르고 있으면 그냥 보낸다.
-    private func passThrough(key: UInt16, flags: CGEventFlags, afterShiftUp: Bool = false) {
+    /// then: 보낸 뒤 다시 열 모드. 스크롤 모드는 흐름(이어 쓰기)대로, 라벨 모드는 바뀐 화면에 라벨을 다시 띄운다.
+    private func passThrough(key: UInt16, flags: CGEventFlags, afterShiftUp: Bool = false, then: ModeKind = .scroll) {
         focusBefore = Self.focusedElement()
         replace(current)
         func post(_ waited: Int) {
@@ -459,7 +466,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 e?.post(tap: .cghidEventTap)
             }
             // 탭을 바꾸는 단축키(⌃Tab)·뒤로 가기는 화면이 바뀌는 데 시간이 조금 걸린다
-            reopenScroll(after: 0.15, unlessTyping: true)
+            if then == .labels {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self, current == nil, !building else { return }
+                    open(.labels)
+                }
+            } else {
+                reopenScroll(after: 0.15, unlessTyping: true)
+            }
         }
         // 스크롤 모드를 닫아 키 포커스가 앱으로 돌아간 뒤에 보낸다
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { post(0) }

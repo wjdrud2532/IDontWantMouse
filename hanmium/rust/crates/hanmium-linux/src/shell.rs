@@ -7,6 +7,7 @@ pub trait Shell {
     fn ping(&self) -> zbus::Result<String>;
     fn prepare(&self) -> zbus::Result<()>;
     fn windows(&self) -> zbus::Result<String>;
+    fn activate(&self, id: u64) -> zbus::Result<()>;
     fn show_overlay(&self, json: &str) -> zbus::Result<()>;
     fn hide_overlay(&self) -> zbus::Result<()>;
     fn grab(&self, on: bool) -> zbus::Result<bool>;
@@ -17,6 +18,8 @@ pub trait Shell {
     fn screenshot(&self, path: &str) -> zbus::Result<bool>;
     #[zbus(signal)]
     fn key(&self, json: String) -> zbus::Result<()>;
+    #[zbus(signal)]
+    fn hotkey(&self, name: String) -> zbus::Result<()>;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

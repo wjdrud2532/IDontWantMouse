@@ -1,32 +1,32 @@
-//! hanmium (리눅스). 지금 되는 것:
+//! hanmium (리눅스).
+//!   hanmium run                     데몬: 확장의 단축키(Hotkey 신호)를 기다려 모드를 연다
 //!   hanmium windows                 확장이 아는 창 목록
 //!   hanmium dump [--buffer]         앞 창의 클릭 대상 (AT-SPI)
-//!   hanmium labels [--buffer]       라벨 모드 한 번: 라벨을 띄우고 키를 받아 고른 것을 누른다(Esc 로 닫기)
+//!   hanmium labels [--buffer]       라벨 모드 한 번(시험용)
 //! 확장(org.hanmium.Shell)이 켜진 GNOME 세션에서 돌린다. 시험은 rust/linux/test-session.sh.
 
 mod a11y;
 mod evdev_keys;
+mod label_mode;
 mod shell;
 
-use a11y::{A11y, Origin, Target};
+use a11y::{A11y, Origin};
 use futures_util::StreamExt;
-use hanmium_core::labels;
-use serde_json::{json, Value};
-use shell::{ShellProxy, Window};
+use label_mode::{find_targets, LabelMode, Res, Step};
+use shell::ShellProxy;
 use std::time::Instant;
-
-type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let origin = if args.iter().any(|a| a == "--buffer") { Origin::Buffer } else { Origin::Frame };
     let result = match args.first().map(String::as_str) {
+        Some("run") => run(origin).await,
         Some("windows") => windows().await,
         Some("dump") => dump(origin).await,
-        Some("labels") => label_mode(origin).await,
+        Some("labels") => labels_once(origin).await,
         _ => {
-            eprintln!("사용법: hanmium windows | dump [--buffer] | labels [--buffer]");
+            eprintln!("사용법: hanmium run | windows | dump [--buffer] | labels [--buffer]");
             std::process::exit(2);
         }
     };
@@ -42,12 +42,6 @@ async fn connect() -> Res<(zbus::Connection, ShellProxy<'static>)> {
     Ok((session, shell))
 }
 
-/// 포커스가 있는 창, 없으면 맨 앞 창
-async fn front_window(shell: &ShellProxy<'_>) -> Res<Window> {
-    let list = shell::parse_windows(&shell.windows().await?);
-    list.iter().find(|w| w.focused).or(list.first()).cloned().ok_or_else(|| "창이 없습니다".into())
-}
-
 async fn windows() -> Res<()> {
     let (_s, shell) = connect().await?;
     for w in shell::parse_windows(&shell.windows().await?) {
@@ -57,21 +51,13 @@ async fn windows() -> Res<()> {
     Ok(())
 }
 
-async fn find_targets(origin: Origin) -> Res<(ShellProxy<'static>, A11y, Window, Vec<Target>)> {
+async fn dump(origin: Origin) -> Res<()> {
     let (_s, shell) = connect().await?;
-    let window = front_window(&shell).await?;
     let a = A11y::new().await?;
     let started = Instant::now();
-    let app = a.app_for_pid(window.pid).await.ok_or("이 창의 앱이 접근성 버스에 없습니다")?;
-    let top = a.window_for(&app, &window).await.ok_or("앱에서 창을 찾지 못했습니다")?;
-    let (targets, visited) = a.targets(&top, &window, origin).await;
-    eprintln!("[{}] 대상 {}개 (노드 {visited}개, {}ms)", window.title, targets.len(), started.elapsed().as_millis());
-    Ok((shell, a, window, targets))
-}
-
-async fn dump(origin: Origin) -> Res<()> {
-    let (_shell, _a, window, targets) = find_targets(origin).await?;
-    println!("창 {} 틀 {:?}", window.title, window.frame);
+    let (window, targets, visited) = find_targets(&shell, &a, origin).await?;
+    println!("창 {} 틀 {:?} — 대상 {}개 (노드 {visited}개, {}ms)", window.title, window.frame, targets.len(),
+             started.elapsed().as_millis());
     for t in &targets {
         println!("  {:?} {:?} ({:.0},{:.0} {:.0}x{:.0}){}", t.role, t.name, t.rect.x, t.rect.y, t.rect.w, t.rect.h,
                  if t.has_action { "" } else { " (동작 없음)" });
@@ -79,67 +65,91 @@ async fn dump(origin: Origin) -> Res<()> {
     Ok(())
 }
 
-fn overlay_json(targets: &[Target], names: &[String], typed: &str) -> String {
-    let labels: Vec<Value> = targets
-        .iter()
-        .zip(names)
-        .filter(|(_, n)| n.starts_with(typed))
-        .map(|(t, n)| json!({"x": t.rect.x, "y": t.rect.y + (t.rect.h - 18.0).max(0.0) / 2.0, "text": n, "typed": typed.chars().count()}))
-        .collect();
-    json!({ "labels": labels }).to_string()
+async fn labels_once(origin: Origin) -> Res<()> {
+    let (_s, shell) = connect().await?;
+    let a = A11y::new().await?;
+    let mut keys = shell.receive_key().await?;
+    let mut mode = LabelMode::open(&shell, &a, origin, Instant::now()).await?;
+    while let Some(k) = keys.next().await {
+        if let Step::Done = mode.key(&shell, &a, &k.args()?.json).await? {
+            break;
+        }
+    }
+    Ok(())
 }
 
-async fn label_mode(origin: Origin) -> Res<()> {
-    let (shell, a, _window, targets) = find_targets(origin).await?;
-    if targets.is_empty() {
-        return Err("클릭 대상이 없습니다".into());
+/// 확장이 부르는 데몬 쪽 D-Bus (org.hanmium.Daemon). 신호를 뿌리면 데몬이 아직 듣고 있지 않을 때(막 켰을 때) 사라지므로
+/// 확장이 메서드를 직접 부른다. 데몬이 없으면 세션 버스가 D-Bus 활성화로 띄워서 전달한다(rust/linux/org.hanmium.Daemon.service).
+enum Event {
+    Hotkey(String),
+    Key(String),
+}
+
+struct DaemonIface {
+    tx: tokio::sync::mpsc::UnboundedSender<Event>,
+}
+
+#[zbus::interface(name = "org.hanmium.Daemon")]
+impl DaemonIface {
+    /// 단축키(labels·search·scroll)
+    fn hotkey(&self, name: String) {
+        let _ = self.tx.send(Event::Hotkey(name));
     }
-    let alphabet = labels::alphabet(labels::DEFAULT_ALPHABET);
-    let names = labels::make(targets.len(), &alphabet);
-    let mut keys = shell.receive_key().await?;
-    let mut typed = String::new();
-    shell.show_overlay(&overlay_json(&targets, &names, &typed)).await?;
-    if !shell.grab(true).await? {
-        shell.hide_overlay().await?;
-        return Err("키보드를 잡지 못했습니다".into());
+    /// 모드 중 키 (확장이 잡은 키, JSON)
+    fn key(&self, json: String) {
+        let _ = self.tx.send(Event::Key(json));
     }
-    println!("라벨 {}개", names.len());
-    while let Some(signal) = keys.next().await {
-        let info: Value = serde_json::from_str(&signal.args()?.json).unwrap_or(Value::Null);
-        if info["pressed"] != Value::Bool(true) {
-            continue;
-        }
-        let code = info["keycode"].as_u64().unwrap_or(0).saturating_sub(8) as u16;
-        match evdev_keys::key(code).map(|k| k.name()) {
-            Some("escape") => {
-                shell.hide_overlay().await?;
-                println!("닫음");
-                return Ok(());
+}
+
+/// 데몬: 단축키를 받아 모드를 열고, 모드 중에는 확장이 보내는 키를 그 모드에 넘긴다
+async fn run(origin: Origin) -> Res<()> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let conn = zbus::connection::Builder::session()?
+        .serve_at("/org/hanmium/Daemon", DaemonIface { tx })?
+        .build()
+        .await?;
+    // 이름은 받은 메서드를 처리할 준비가 된 뒤에 갖는다(활성화로 떴을 때 기다리던 호출이 바로 들어온다)
+    let flags = zbus::fdo::RequestNameFlags::DoNotQueue.into();
+    match conn.request_name_with_flags("org.hanmium.Daemon", flags).await {
+        Ok(zbus::fdo::RequestNameReply::PrimaryOwner) => {}
+        _ => return Err("hanmium 데몬이 이미 실행 중입니다".into()),
+    }
+    let shell = ShellProxy::new(&conn).await?;
+    let a = A11y::new().await?;
+    let mut mode: Option<LabelMode> = None;
+    println!("hanmium 데몬 시작 (확장 {})", shell.ping().await.unwrap_or_else(|_| "없음".into()));
+    while let Some(event) = rx.recv().await {
+        match event {
+            Event::Hotkey(name) => {
+                let started = Instant::now();
+                match name.as_str() {
+                    "labels" => {
+                        if let Some(mut m) = mode.take() {
+                            m.close(&shell).await?;
+                            continue;
+                        }
+                        match LabelMode::open(&shell, &a, origin, started).await {
+                            Ok(m) => mode = Some(m),
+                            Err(e) => eprintln!("라벨 모드를 열지 못함: {e}"),
+                        }
+                    }
+                    other => eprintln!("아직 없는 모드: {other}"),
+                }
             }
-            Some("delete_or_backspace") => {
-                typed.pop();
-            }
-            _ => {
-                if let Some(c) = evdev_keys::char_of(code) {
-                    typed.push(c);
+            Event::Key(json) => {
+                if let Some(m) = mode.as_mut() {
+                    match m.key(&shell, &a, &json).await {
+                        Ok(Step::Continue) => {}
+                        Ok(Step::Done) => mode = None,
+                        Err(e) => {
+                            eprintln!("라벨 모드 오류: {e}");
+                            let _ = shell.hide_overlay().await;
+                            mode = None;
+                        }
+                    }
                 }
             }
         }
-        let matching: Vec<usize> = (0..names.len()).filter(|&i| names[i].starts_with(&typed)).collect();
-        if matching.is_empty() {
-            typed.clear();
-        } else if matching.len() == 1 && names[matching[0]] == typed {
-            shell.hide_overlay().await?;
-            let t = &targets[matching[0]];
-            let pressed = a.activate(t).await;
-            if !pressed {
-                let (x, y) = t.rect.center();
-                shell.click(x, y, 1).await?;
-            }
-            println!("고름 {typed}: {:?} {:?} ({})", t.role, t.name, if pressed { "접근성 동작" } else { "클릭" });
-            return Ok(());
-        }
-        shell.show_overlay(&overlay_json(&targets, &names, &typed)).await?;
     }
     Ok(())
 }

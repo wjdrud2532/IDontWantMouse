@@ -76,6 +76,8 @@ final class ScrollMode: Mode {
     private var probe: ScrollProbe?
     private var probeToken = 0
     private var checking: (sent: CGVector, before: [CGFloat?])?
+    /// 이 지점에서 "안 움직였다"가 한 번 나왔다: 표지를 새로 찾아 한 번 더 확인한 뒤에야 지점을 바꾼다
+    private var doubtful = false
     /// 앱·영역 종류마다 실제로 스크롤된 지점 후보 번호 (다음에 열 때 그것부터 쓴다)
     private static var aimMemory: [String: Int] = [:]
 
@@ -131,6 +133,7 @@ final class ScrollMode: Mode {
         if changed, target != nil {
             // 휠을 보낼 지점이 맞는지 볼 표지는 새 요소에서 다시 찾는다
             aimConfirmed = false
+            doubtful = false
             checking = nil
             findProbe()
         }
@@ -414,6 +417,7 @@ final class ScrollMode: Mode {
             // 커서는 그대로 두고 영역 안 지점으로 보낸다. 처음 보낼 때 실제로 움직였는지 확인한다(armAimCheck).
             aimIndex = Self.aimMemory[aimKey] ?? 0
             aimConfirmed = false
+            doubtful = false
             checking = nil
             scrollPoint = aimPoints[aimIndex]
             findProbe()
@@ -685,33 +689,42 @@ final class ScrollMode: Mode {
         }
     }
 
+    /// 보낸 뒤 내용이 움직였는지 본다. 안 움직였어도 이미 보낸 양을 다른 지점에 다시 보내지 않는다: 표지가 낡으면(Chrome 에서
+    /// 페이지를 옮긴 직후 등) 움직였는데도 안 움직인 것으로 보여서, 다시 보낸 양이 키를 뗀 뒤에 두 번 더 뚝뚝 움직였다
+    /// (2026-11-12, Hacker News "더 보기" 뒤). 표지를 새로 찾아 한 번 더 확인하고, 그래도 안 움직였을 때만 다음부터 다른 지점으로 보낸다.
     private func checkAim(area: Int) {
         guard let c = checking else { return }
         checking = nil
-        guard !stopped, area == index, let probe, let target else { return }
+        guard !stopped, area == index, let probe, target != nil else { return }
         let after = probe.read()
-        // 표지를 하나도 못 읽으면(요소가 사라짐) 움직였는지 알 수 없다. 다른 지점에 다시 보내면 크게 튀므로 그만 본다.
+        // 표지를 하나도 못 읽으면(요소가 사라짐) 움직였는지 알 수 없다
         if (c.before + after).allSatisfy({ $0 == nil }) { return }
-        if !ScrollProbe.moved(c.before, after) {
-            let points = aimPoints
-            guard aimIndex + 1 < points.count else {
-                // 어느 지점도 안 움직였다: 끝에 닿았을 수 있으니 처음 지점으로 돌아가고 다음에 다시 확인한다
-                Log.write("스크롤 지점: 어디서도 움직이지 않음 (끝일 수 있음) [\(aimKey)]")
-                aimIndex = 0
-                scrollPoint = points[0]
-                armAimCheck()
-                return
-            }
-            aimIndex += 1
-            scrollPoint = points[aimIndex]
-            Log.write("스크롤 지점: 안 움직여서 \(aimIndex)번 후보로 [\(aimKey)]")
-            _ = Mouse.scroll(by: c.sent, at: scrollPoint, to: target)
-            checking = (sent: c.sent, before: after)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.checkAim(area: area) }
+        if ScrollProbe.moved(c.before, after) {
+            doubtful = false
+            aimConfirmed = true
+            Self.aimMemory[aimKey] = aimIndex
             return
         }
-        aimConfirmed = true
-        Self.aimMemory[aimKey] = aimIndex
+        if !doubtful {
+            // 처음 한 번은 표지가 낡았을 수 있다: 새로 찾아 다음 스크롤에서 다시 본다
+            doubtful = true
+            findProbe()
+            return
+        }
+        doubtful = false
+        let points = aimPoints
+        guard aimIndex + 1 < points.count else {
+            // 어느 지점에서도 안 움직였다: 끝에 닿았거나 표지를 믿을 수 없다. 처음 지점으로 두고 더는 보지 않는다.
+            Log.write("스크롤 지점: 어디서도 움직이지 않아 첫 지점으로 두고 확인을 그만함 [\(aimKey)]")
+            aimIndex = 0
+            scrollPoint = points[0]
+            aimConfirmed = true
+            return
+        }
+        aimIndex += 1
+        scrollPoint = points[aimIndex]
+        Log.write("스크롤 지점: 두 번 확인해도 안 움직여서 다음부터 \(aimIndex)번 후보로 [\(aimKey)]")
+        findProbe()
     }
 
     /// 세로 스크롤 막대 값을 0/1 로 직접 바꾸고, 안 되면 큰 휠 이벤트를 여러 번 보낸다.

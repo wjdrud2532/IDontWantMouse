@@ -2,6 +2,7 @@
 // 보낼 수도 없어서 이 확장이 대신 한다. hanmium 데몬(Rust)이 세션 버스의 org.hanmium.Shell 로 부른다.
 //
 //   Prepare()            시험용: 현황(Overview)을 닫는다
+//   Activate(id)         그 창을 앞으로
 //   Windows()            보이는 창 목록(JSON): id·pid·앱 id·제목·틀·버퍼 사각형·포커스, 앞에서 뒤 순서
 //   ShowOverlay(json)    라벨·사각형·번호를 모든 창 위에 그린다. 다시 부르면 바꿔 그린다.
 //   HideOverlay()
@@ -11,7 +12,10 @@
 //   MovePointer(x, y)
 //   TestKey(keycode, pressed)  시험용: 가상 키보드로 키를 보낸다(진짜 키보드처럼 잡기·앱으로 간다)
 //   Screenshot(path)     시험용: 화면을 PNG 로
+//   단축키(설정 labels·search·scroll, 기본 Alt+Space·Alt+/·Shift+Super+J)와 모드 중 키는 데몬 메서드
+//   org.hanmium.Daemon.Hotkey(name)·Key(json) 를 직접 부른다(신호 Hotkey·Key 도 같이 보낸다: 시험·관찰용)
 import Clutter from 'gi://Clutter';
+import Meta from 'gi://Meta';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -25,6 +29,7 @@ const IFACE = `<node><interface name="org.hanmium.Shell">
   <method name="Ping"><arg type="s" direction="out" name="version"/></method>
   <method name="Prepare"/>
   <method name="Windows"><arg type="s" direction="out" name="json"/></method>
+  <method name="Activate"><arg type="t" direction="in" name="id"/></method>
   <method name="ShowOverlay"><arg type="s" direction="in" name="json"/></method>
   <method name="HideOverlay"/>
   <method name="Grab"><arg type="b" direction="in" name="on"/><arg type="b" direction="out" name="ok"/></method>
@@ -34,9 +39,24 @@ const IFACE = `<node><interface name="org.hanmium.Shell">
   <method name="TestKey"><arg type="u" direction="in" name="keycode"/><arg type="b" direction="in" name="pressed"/></method>
   <method name="Screenshot"><arg type="s" direction="in" name="path"/><arg type="b" direction="out" name="ok"/></method>
   <signal name="Key"><arg type="s" name="json"/></signal>
+  <signal name="Hotkey"><arg type="s" name="name"/></signal>
 </interface></node>`;
 
 const now = () => GLib.get_monotonic_time();
+
+// 단축키·모드 중 키는 hanmium 데몬(org.hanmium.Daemon)의 메서드를 직접 부른다. 신호만 뿌리면 데몬이 막 떠서 아직 듣지 않을 때
+// 사라진다. 데몬이 없으면 세션 버스가 D-Bus 활성화로 띄워 전달한다. 실패하면 로그에 남긴다.
+function callDaemon(method, arg) {
+    Gio.DBus.session.call('org.hanmium.Daemon', '/org/hanmium/Daemon', 'org.hanmium.Daemon', method,
+        new GLib.Variant('(s)', [arg]), null, Gio.DBusCallFlags.NONE, 5000, null,
+        (conn, res) => {
+            try {
+                conn.call_finish(res);
+            } catch (e) {
+                console.warn(`hanmium: 데몬 ${method} 실패: ${e.message}`);
+            }
+        });
+}
 
 class Service {
     constructor() {
@@ -78,6 +98,13 @@ class Service {
             focused: w.has_focus(),
             type: w.get_window_type(),
         })));
+    }
+
+    // 창 하나를 앞으로(포커스)
+    Activate(id) {
+        const w = global.get_window_actors().map(a => a.meta_window).find(m => m && m.get_id() === Number(id));
+        if (w)
+            Main.activateWindow(w);
     }
 
     _ensureOverlay() {
@@ -159,7 +186,9 @@ class Service {
             state: event.get_state(),
             time: event.get_time(),
         };
-        this.emit('Key', JSON.stringify(info));
+        const json = JSON.stringify(info);
+        callDaemon('Key', json);
+        this.emit('Key', json);
         return Clutter.EVENT_STOP;
     }
 
@@ -204,6 +233,8 @@ class Service {
     }
 }
 
+const HOTKEYS = ['labels', 'search', 'scroll'];
+
 export default class HanmiumExtension extends Extension {
     enable() {
         this._service = new Service();
@@ -211,9 +242,22 @@ export default class HanmiumExtension extends Extension {
         this._service.emit = (name, json) => this._dbus.emit_signal(name, new GLib.Variant('(s)', [json]));
         this._dbus.export(Gio.DBus.session, '/org/hanmium/Shell');
         this._owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.hanmium.Shell', Gio.BusNameOwnerFlags.REPLACE, null, null, null);
+        // 단축키: 창이 앞에 있을 때(NORMAL)와 현황 화면에서. 모드 중(키보드를 잡은 동안)에는 확장이 키를 Key 신호로 보낸다.
+        this._settings = this.getSettings();
+        for (const name of HOTKEYS) {
+            Main.wm.addKeybinding(name, this._settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+                () => {
+                    callDaemon('Hotkey', name);
+                    this._dbus.emit_signal('Hotkey', new GLib.Variant('(s)', [name]));
+                });
+        }
     }
 
     disable() {
+        for (const name of HOTKEYS)
+            Main.wm.removeKeybinding(name);
+        this._settings = null;
         if (this._owner)
             Gio.bus_unown_name(this._owner);
         this._dbus?.unexport();

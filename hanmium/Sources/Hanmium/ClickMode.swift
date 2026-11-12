@@ -14,6 +14,10 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
     var onScroll: ((NSEvent) -> Void)?
     /// 라벨 모드에서 1~9: 그 번호의 스크롤 영역(창)을 고른 채 스크롤 모드로 바꾼다
     var onScrollNumber: ((Int) -> Void)?
+    /// Shift + 스크롤 키(기본 h·l): 뒤로(true)·앞으로 — 스크롤 모드와 같다
+    var onHistory: ((Bool) -> Void)?
+    /// Shift + 스크롤 키(기본 j·k): 앞 탭(true)·뒤 탭 — 스크롤 모드와 같다
+    var onTab: ((Bool) -> Void)?
     /// 스크롤 영역 번호를 그릴 자리(ScrollMode.numberSpots). 뒤에서 스크롤 영역을 찾은 뒤에 채운다.
     private var scrollNumbers: [CGPoint] = []
     /// 스크롤 모드가 뜨기를 기다리는 중: 보이지 않게 하고 키 포커스만 쥐고 있다(hideForHandoff)
@@ -113,6 +117,19 @@ final class ClickMode: NSObject, Mode, NSTextFieldDelegate {
         if c == Config.labelToSearchKey {
             switchToSearch()
             return
+        }
+        // Shift + h·j·k·l: 스크롤 모드처럼 뒤로·앞으로, 앞·뒤 탭. 라벨을 치기 시작한 뒤라면 라벨 글자(Shift 는 오른쪽 클릭)로 본다.
+        if typed.isEmpty, event.modifierFlags.contains(.shift),
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            let keys = Config.scrollKeys
+            if let onHistory, c == keys[0] || c == keys[3] {
+                onHistory(c == keys[0])
+                return
+            }
+            if let onTab, c == keys[1] || c == keys[2] {
+                onTab(c == keys[1])
+                return
+            }
         }
         if let n = c.wholeNumberValue, n >= 1, n <= scrollNumbers.count, let onScrollNumber {
             onScrollNumber(n)

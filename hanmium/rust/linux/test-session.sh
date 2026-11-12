@@ -5,6 +5,7 @@
 #   test-session.sh run CMD…      그 세션 안에서 명령 실행 (WAYLAND_DISPLAY·D-Bus·접근성 버스가 그 세션 것)
 #   test-session.sh call METHOD [ARGS…]   확장의 org.hanmium.Shell 메서드 부르기 (gdbus)
 #   test-session.sh shot PNG      화면 찍기
+#   test-session.sh chrome URL     시험용 Chrome (프로필 따로, 키링 창이 뜨지 않게 --password-store=basic)
 #   test-session.sh stop
 set -e
 DIR=${HANMIUM_TEST_DIR:-/tmp/hanmium-gnome}
@@ -25,6 +26,12 @@ start)
     mkdir -p $DIR/{config,data/gnome-shell/extensions,cache,state,runtime}
     chmod 700 $DIR/runtime
     cp -r "$EXT_SRC" $DIR/data/gnome-shell/extensions/
+    glib-compile-schemas $DIR/data/gnome-shell/extensions/hanmium@hanmium.local/schemas
+    # 데몬 D-Bus 활성화(세션 버스는 $XDG_DATA_HOME/dbus-1/services 를 본다). 데몬 출력은 $DIR/daemon.log
+    mkdir -p $DIR/data/dbus-1/services
+    bin="$(cd "$(dirname "$0")/.." && pwd)/target/debug/hanmium"
+    printf '[D-BUS Service]\nName=org.hanmium.Daemon\nExec=/bin/sh -c "exec %s run >>%s/daemon.log 2>&1"\n' "$bin" "$DIR" \
+        > $DIR/data/dbus-1/services/org.hanmium.Daemon.service
     # 세션이 띄우는 것(D-Bus, 접근성 버스, 포털, gvfs 등)을 모두 systemd 범위 하나에 넣어 stop 때 한꺼번에 끈다
     uid=$(id -u)
     XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
@@ -36,6 +43,7 @@ start)
         gsettings set org.gnome.shell disable-user-extensions false
         gsettings set org.gnome.shell enabled-extensions \"['hanmium@hanmium.local']\"
         gsettings set org.gnome.desktop.interface toolkit-accessibility true
+        gsettings set org.gnome.desktop.wm.keybindings activate-window-menu \"[]\"
         exec gnome-shell --headless --wayland --no-x11 --virtual-monitor $size" > $DIR/shell.log 2>&1 &
     for _ in $(seq 1 60); do
         sleep 0.25
@@ -55,6 +63,11 @@ run)
 call)
     shift; envs; m=$1; shift
     exec gdbus call --session --dest org.hanmium.Shell --object-path /org/hanmium/Shell --method org.hanmium.Shell.$m "$@"
+    ;;
+chrome)
+    shift; envs
+    nohup google-chrome --user-data-dir=$DIR/chrome --password-store=basic --no-first-run --no-default-browser-check \
+        --ozone-platform=wayland --window-size=1200,800 "$@" > $DIR/chrome.log 2>&1 &
     ;;
 shot)
     envs

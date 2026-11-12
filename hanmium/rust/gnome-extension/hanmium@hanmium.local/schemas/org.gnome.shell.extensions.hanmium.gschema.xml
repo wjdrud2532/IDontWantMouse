@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.hanmium" path="/org/gnome/shell/extensions/hanmium/">
+    <key name="labels" type="as">
+      <default><![CDATA[['<Alt>space']]]></default>
+      <summary>라벨 모드</summary>
+    </key>
+    <key name="search" type="as">
+      <default><![CDATA[['<Alt>slash']]]></default>
+      <summary>검색 모드</summary>
+    </key>
+    <key name="scroll" type="as">
+      <default><![CDATA[['<Shift><Super>j']]]></default>
+      <summary>스크롤 모드</summary>
+    </key>
+  </schema>
+</schemalist>

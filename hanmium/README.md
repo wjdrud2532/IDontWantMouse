@@ -112,6 +112,8 @@ open build/Hanmium.app
 | `/` | 검색 모드로 바꾸기 |
 | `j` / `k` | 스크롤 모드로 바꾸면서 아래 / 위로 스크롤. 누르고 있으면 스크롤 모드에서 누른 것처럼 계속 간다 |
 | `1`–`9` | 스크롤 영역 번호(라벨이 뜬 뒤 영역을 찾으면 붙는다. 스크롤 모드의 숫자와 같은 번호). 그 영역(창이 여러 개면 그 창)을 고른 채 스크롤 모드로 바꾼다 |
+| `Shift-h` / `Shift-l` | 뒤로 / 앞으로 (스크롤 모드와 같음). 바뀐 화면에 라벨을 다시 띄운다. 라벨을 치기 시작한 뒤의 Shift+글자는 라벨(오른쪽 클릭) |
+| `Shift-j` / `Shift-k` | 앞(왼쪽) / 뒤(오른쪽) 탭 (스크롤 모드와 같음). 옮긴 탭에 라벨을 다시 띄운다 |
 | `Esc` 또는 `⌥Space` | 닫기 (스크롤 모드의 `f` 로 띄운 라벨이면 `Esc` 는 스크롤 모드로 돌아가고, `⌥Space` 는 모두 닫는다) |
 
 - **WezTerm 분할 창**: 분할 창 라벨을 고르면 마우스를 누르지 않고 `wezterm cli activate-pane` 으로 그 창으로 옮긴다. Claude Code·vim 처럼 마우스를 받는 프로그램에 클릭이 들어가지 않게 하려는 것이다.
@@ -284,7 +286,7 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 | `Tools/run-all-tests.sh` | 아래 회귀 테스트를 한 번에 돌리고 결과를 모아 보여 준다. `--live` 를 붙이면 실제 키 시험까지 |
 | `Tools/live-keys.sh` | 키보드 규칙을 실제 키 경로로 시험(35개). 바뀐 키·클릭·휠은 앱에 닿기 전에 버리므로 쓰고 있는 창에는 아무것도 들어가지 않는다 |
 | `Tools/live-latency.sh` | 라벨이 뜨는 시간을 실제 앱·사이트에서 잼(앱마다 앞으로 가져와 라벨 4번). 사이트는 프로필을 따로 쓰는 시험용 Chrome 에서 |
-| `Tools/live-modes.sh` | 시험 창을 띄워 라벨·스크롤 모드를 실제 키로 시험(16개: 라벨에서 j 꾹·k, 영역 번호, Shift+H/L/J/K, Shift+G·gg, f, 닫기). 창 아래 진행 막대에 퍼센트·개수·지금 시험 이름 |
+| `Tools/live-modes.sh` | 시험 창을 띄워 라벨·스크롤 모드를 실제 키로 시험(21개: 라벨에서 j 꾹·k, 영역 번호, 두 모드의 Shift+H/L/J/K, Shift+G·gg, f, 닫기, VS Code 처럼 나뉜 칸). 창 아래 진행 막대에 퍼센트·개수·지금 시험 이름 |
 | `Tools/wezterm-fixtures.sh` | WezTerm 패널 배치 회귀 테스트. 틀렸던 CLI 출력(화면을 옮긴 뒤 남은 픽셀 값 등)과 창 크기를 `Tools/WezTermFixtures/cases` 에 남겨 두고, 계산한 패널 영역이 화면에서 확인한 값과 같은지 본다. 화면·WezTerm 을 건드리지 않는다 |
 | `defaults write com.local.Hanmium profile -bool true` | 라벨 찾기 단계별 시간을 로그에 남긴다 (끄기: `defaults delete com.local.Hanmium profile`) |
 

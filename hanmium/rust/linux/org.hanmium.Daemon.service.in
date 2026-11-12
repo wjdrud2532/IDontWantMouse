@@ -1,0 +1,5 @@
+# 세션 D-Bus 활성화: 확장이 org.hanmium.Daemon 을 부를 때 데몬이 없으면 띄운다.
+# 설치할 때 @HANMIUM@ 를 실행 파일 경로로 바꿔 ~/.local/share/dbus-1/services/ 에 둔다 (시험 세션은 test-session.sh 가 한다).
+[D-BUS Service]
+Name=org.hanmium.Daemon
+Exec=@HANMIUM@ run

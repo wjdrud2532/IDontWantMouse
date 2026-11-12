@@ -29,6 +29,7 @@ pub fn key(code: u16) -> Option<Key> {
     TABLE.iter().find(|(c, _)| *c == code).and_then(|(_, n)| Key::named(n))
 }
 
+#[allow(dead_code)] // 키 바꾸기(uinput 로 내보내기)에서 쓴다
 pub fn code(key: Key) -> Option<u16> {
     TABLE.iter().find(|(_, n)| *n == key.name()).map(|(c, _)| *c)
 }

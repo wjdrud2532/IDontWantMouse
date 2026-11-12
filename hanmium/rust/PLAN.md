@@ -38,7 +38,7 @@ rust/
 
 ## 시험
 - `cargo test` (rust/): 코어 단위 시험 + `tests/keyboard_fixtures.rs` (맥판 46개).
-- 리눅스 실제 시험: headless GNOME 시험 도구 (예정).
+- 리눅스 실제 키 시험: `linux/live-test.sh` (jkhan 에서, 사용자 세션과 따로 띄운 headless GNOME). 시험 페이지 `linux/testpages/`.
 
 ## 진행 기록
 - 2026-11-12: 작업 공간, 코어(keys·rules·engine·modsync·mousekeys·labels), 맥판 키보드 시험 46개 이식 — 맥·jkhan 통과.
@@ -48,8 +48,22 @@ rust/
   틀 위치가 화면과 맞음), 라벨을 띄우고, 키보드를 잡아 키를 받고, `d` 로 "새 탭"을 접근성 동작으로 눌러 탭이 2개가 됨.
   동작이 없는 단추는 가상 포인터로 클릭(팝업이 뜸).
 
+- 2026-11-12: 단축키·데몬. 확장이 GSettings 키(labels·search·scroll, 기본 Alt+Space·Alt+/·Shift+Super+J)로 키 바인딩을 잡아
+  `Hotkey(name)` 신호를 보내고, `hanmium run` 데몬이 받아 라벨 모드를 연다(모드 중 키는 `Key` 신호). GNOME 의 Alt+Space(창 메뉴)는
+  시험 세션에서 비움. 텍스트 편집기: 단축키 → 라벨 30ms → `d` 로 "새 탭". 확장 `Activate(id)` 추가.
+- 2026-11-12: Chrome(리눅스, Wayland). 그냥 띄운 Chrome 은 AT-SPI 창 아래가 비어 있다(노드 2개). ACCESSIBILITY_ENABLED=1,
+  org.a11y.Status ScreenReaderEnabled, GNOME 화면 읽기 설정 모두 효과 없음(Chrome 은 /proc 에서 orca 프로세스를 찾아 켠다).
+  **앱·창 객체에 GetAttributes·GetRelationSet 을 부르면(Orca 처럼) 바로 켜진다** → `A11y::wake`. 막 띄운 Chrome 에서
+  플래그 없이 첫 라벨 모드 대상 45개(페이지 링크·단추 포함) 찾기 45ms·띄움 60ms. Wayland 에서도 창 기준 좌표 + 확장의 틀 위치가 맞음(화면 확인).
+- 2026-11-12: 단축키가 가끔 안 먹던 것 고침. ① 시험 환경: 시험용 Chrome 이 GNOME 키링 암호 창을 띄워 키를 모두 가져갔다 →
+  `--password-store=basic`(`test-session.sh chrome`). ② 설계: 확장이 신호를 뿌리기만 해서 데몬이 아직 듣지 않으면(막 켰을 때)
+  사라지고, 데몬이 죽으면 아무 반응이 없었다 → 확장이 데몬 메서드 `org.hanmium.Daemon.Hotkey/Key` 를 직접 부르고, 데몬이 없으면
+  세션 버스가 D-Bus 활성화로 띄워 전달(`linux/org.hanmium.Daemon.service.in`). 실패는 셸 로그에 남김.
+- 리눅스 실제 키 시험 `linux/live-test.sh`: 데몬 자동 실행, 텍스트 편집기 라벨 d → 새 탭, Chrome 페이지 대상 40개 넘음,
+  창을 바꾼 직후 단축키 20번, 데몬이 죽은 직후, 라벨 띄움 100ms 안 — 6/6 통과 (띄움 중앙 46ms·최대 73ms).
+
 ## 다음
-1. 라벨 모드 다듬기: 단축키(확장 키 바인딩), 라벨 모양(맥판과 같게), 여러 창·메뉴·팝업, Chromium/Electron 접근성 켜기, 큰 트리 속도
+1. 라벨 모드 다듬기: 라벨 모양(맥판과 같게), 여러 창·메뉴·팝업, VS Code·Slack(Electron) 확인, 큰 트리 속도
 2. 스크롤 모드: 스크롤 영역 찾기(AT-SPI ScrollPane·Viewport + 웹 단서), 휠 보내기(확장 Scroll), 테두리·번호, j/k/d/u/gg/G/H/L/J/K
 3. 검색 모드
 4. 키 바꾸기: evdev + uinput (사용자가 sudo 로 input 그룹 추가 한 번)

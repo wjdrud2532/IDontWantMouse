@@ -224,6 +224,10 @@ let plan = [
     "라벨에서 k 짧게 → 스크롤 모드 + 위로 조금",
     "Esc → 닫힘",
     "VS Code 처럼 나뉜 칸: ⇧⌘J 스크롤 모드에서 j → 대화 칸이 한 번에 움직임",
+    "라벨 모드 Shift+H → 뒤로 (⌘[) 뒤 라벨 다시",
+    "라벨 모드 Shift+L → 앞으로 (⌘]) 뒤 라벨 다시",
+    "라벨 모드 Shift+J → 앞 탭 (⌘⇧[) 뒤 라벨 다시",
+    "라벨 모드 Shift+K → 뒤 탭 (⌘⇧]) 뒤 라벨 다시",
 ]
 var pass = 0, fail = 0, skipped = 0
 func showProgress(_ text: String) {
@@ -404,6 +408,23 @@ func run() throws {
     let again = logCount("스크롤 지점: 안 움직여서") - retried
     check(plan[16], scrollOpened && chatTop > 100 && sideTop == 0 && again == 0,
           "대화 scrollTop \(chatTop) · 옆 창 \(sideTop) · 다른 지점으로 다시 보냄 \(again)번")
+    try tap(53)
+    _ = waitOverlays({ $0 == 0 })
+
+    // 18~21. 라벨 모드에서도 Shift+h·l·j·k 가 스크롤 모드처럼: 앱에 ⌘[ ⌘] ⌘⇧[ ⌘⇧] 를 넘기고 라벨을 다시 띄운다
+    n = logCount(labelLog)
+    try optSpace()
+    _ = waitLog(labelLog, after: n)
+    for (i, (key, want)) in [(H, "⌘33"), (L, "⌘30"), (J, "⇧⌘33"), (K, "⇧⌘30")].enumerated() {
+        begin(plan[17 + i])
+        _ = takeReceived()
+        n = logCount(labelLog)
+        try shifted(key)
+        let reopened = waitLog(labelLog, after: n, 2.0)
+        _ = waitOverlays({ $0 > 0 })
+        let got = takeReceived()
+        check(plan[17 + i], got == [want] && reopened, "시험 창이 받은 키 \(got), 라벨 다시 뜸 \(reopened)")
+    }
     try tap(53)
     _ = waitOverlays({ $0 == 0 })
 }

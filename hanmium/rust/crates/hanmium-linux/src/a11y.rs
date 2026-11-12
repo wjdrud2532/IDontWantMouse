@@ -83,6 +83,17 @@ impl A11y {
         active.or(first)
     }
 
+    /// Chromium·Electron 앱(Chrome, VS Code, Slack 등)은 접근성을 꺼 둔 채 창 아래를 비워 둔다. Orca 처럼 속성·관계를 물으면
+    /// 그때 켠다(2026-11-12 jkhan Chrome 에서 확인: --force-renderer-accessibility 없이 페이지 링크까지 나옴). GTK 앱에는 영향 없다.
+    pub async fn wake(&self, objects: &[&ObjectRefOwned]) {
+        for o in objects {
+            if let Ok(p) = o.as_accessible_proxy(self.bus()).await {
+                let _ = p.get_attributes().await;
+                let _ = p.get_relation_set().await;
+            }
+        }
+    }
+
     /// 창 안의 클릭 대상 (보이는 것만)
     pub async fn targets(&self, top: &ObjectRefOwned, window: &Window, origin: Origin) -> (Vec<Target>, usize) {
         let base = match origin {
