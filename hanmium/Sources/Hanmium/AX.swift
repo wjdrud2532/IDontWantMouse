@@ -30,6 +30,13 @@ enum AX {
 
     static func bool(_ v: CFTypeRef?) -> Bool? { v as? Bool }
 
+    /// 요소의 화면 위치·크기
+    static func frame(_ ref: AXUIElement) -> CGRect? {
+        let v = multi(ref, [kAXPositionAttribute, kAXSizeAttribute])
+        guard let o = point(v[0]), let s = size(v[1]) else { return nil }
+        return CGRect(origin: o, size: s)
+    }
+
     static func point(_ v: CFTypeRef?) -> CGPoint? {
         guard let v, CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
         var p = CGPoint.zero

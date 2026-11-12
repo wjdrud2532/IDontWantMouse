@@ -38,6 +38,25 @@ for (const id of ['a', 'b']) {
 </script></body></html>
 """
 
+/// VS Code 처럼 한 영역(편집기 묶음 split-view-view) 안이 두 칸으로 나뉜 페이지: 왼쪽은 스크롤되는 대화(#chat, 클래스에 scroll
+/// 단서 없음), 오른쪽은 스크롤되지 않는 좁은 옆 창(#side, Claude Code 의 Side question). 휠을 영역 가장자리로 보내면 옆 창으로 간다.
+let vscodeLikeHTML = """
+<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;overflow:hidden;font:14px -apple-system}
+.split-view-view{position:absolute;inset:0}
+#chat{position:absolute;left:0;top:0;bottom:0;width:72%;overflow-y:auto;background:#eef}
+#side{position:absolute;right:0;top:0;bottom:0;width:28%;overflow-y:auto;background:#ffe}
+p{margin:0;padding:6px 12px;height:22px}
+</style></head><body>
+<div class="split-view-view visible" role="region" aria-label="editor-group">
+<div id="chat" role="region" aria-label="chat" class="messagesContainer_07S1Yg"></div>
+<div id="side" role="region" aria-label="side" class="panel_TgmhTA"><p>Side question</p><p>짧은 내용</p></div>
+</div><script>
+const d = document.getElementById('chat')
+for (let i = 0; i < 400; i++) { const p = document.createElement('p'); p.textContent = `대화 줄 ${i}`; d.appendChild(p) }
+</script></body></html>
+"""
+
 final class Loader: NSObject, WKNavigationDelegate {
     var loaded = false
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true }
@@ -204,6 +223,7 @@ let plan = [
     "스크롤 모드에서 Tab → 모두 닫힘",
     "라벨에서 k 짧게 → 스크롤 모드 + 위로 조금",
     "Esc → 닫힘",
+    "VS Code 처럼 나뉜 칸: ⇧⌘J 스크롤 모드에서 j → 대화 칸이 한 번에 움직임",
 ]
 var pass = 0, fail = 0, skipped = 0
 func showProgress(_ text: String) {
@@ -356,6 +376,36 @@ func run() throws {
     let c = logCount(closeLog)
     try tap(53)
     check("Esc → 닫힘", waitOverlays({ $0 == 0 }) && waitLog(closeLog, after: c), "")
+
+    // 17. VS Code 처럼 한 영역 안이 대화 + 옆 창으로 나뉜 페이지 (2026-11-12 VS Code 에서 휠이 Side question 창으로 가던 것).
+    //     휠을 영역 가운데부터 보내야 대화가 움직인다. 다른 지점으로 다시 보내지(스크롤 지점: 안 움직여서) 않아야 한다.
+    begin(plan[16])
+    onMain {
+        loader.loaded = false
+        web.loadHTMLString(vscodeLikeHTML, baseURL: nil)
+    }
+    let end = Date().addingTimeInterval(4)
+    while Date() < end && !onMain({ loader.loaded }) { wait(0.05) }
+    wait(1.0)
+    let retried = logCount("스크롤 지점: 안 움직여서")
+    n = logCount(scrollLog)
+    let CMD = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x08)
+    try mod(55, CMD); try mod(56, CGEventFlags(rawValue: CMD.rawValue | SHIFT.rawValue))
+    try tap(J, CGEventFlags(rawValue: CMD.rawValue | SHIFT.rawValue))
+    try mod(56, CMD); try mod(55, [])
+    let scrollOpened = waitLog(scrollLog, after: n)
+    _ = js("document.getElementById('chat').scrollTop = 0; 1")
+    wait(0.3)
+    try hold(J, 0.6)
+    wait(0.4)
+    let parts = js("document.getElementById('chat').scrollTop + ',' + document.getElementById('side').scrollTop")
+        .split(separator: ",").compactMap { Int(Double($0) ?? -1) }
+    let chatTop = parts.first ?? -1, sideTop = parts.count > 1 ? parts[1] : -1
+    let again = logCount("스크롤 지점: 안 움직여서") - retried
+    check(plan[16], scrollOpened && chatTop > 100 && sideTop == 0 && again == 0,
+          "대화 scrollTop \(chatTop) · 옆 창 \(sideTop) · 다른 지점으로 다시 보냄 \(again)번")
+    try tap(53)
+    _ = waitOverlays({ $0 == 0 })
 }
 
 // --bar-preview <png>: 키를 보내지 않고 다른 창 뒤에 창을 띄워 진행 막대 모습만 찍는다(막대를 고칠 때 확인용)

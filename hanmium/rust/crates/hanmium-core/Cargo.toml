@@ -1,0 +1,10 @@
+[package]
+name = "hanmium-core"
+description = "Hanmium 공통 코어: 키보드 규칙 엔진(Karabiner 형식), 라벨, 마우스 키 계산. 운영체제 API 를 쓰지 않는다."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+regex.workspace = true

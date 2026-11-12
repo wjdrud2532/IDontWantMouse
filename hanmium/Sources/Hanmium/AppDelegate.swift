@@ -88,13 +88,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 앞 앱이 바뀌어 사용 여부가 달라지면 단축키를 놓거나 다시 잡는다
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self, frontmostBlocked != blockedActive else { return }
+        ) { [weak self] note in
+            guard let self else { return }
+            // 크로미엄 브라우저가 앞으로 오면 라벨을 열기 전에 접근성 켜기·Chrome 과의 첫 연결을 미리 해 둔다(처음 열 때 100ms)
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+               let id = app.bundleIdentifier, AXEnabler.chromiumBrowsers.contains(id) {
+                let pid = app.processIdentifier
+                axQueue.async { AXEnabler.warmUp(pid: pid, bundleID: id) }
+            }
+            guard frontmostBlocked != blockedActive else { return }
             reloadHotkeys()
         }
 
         if let launchMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.toggle(launchMode) }
+        }
+        // 처음 모드를 열 때 드는 준비(실행 중인 앱 목록, 화면 캡처 첫 연결 약 80ms)를 미리 해 둔다:
+        // 안 그러면 켠 뒤 첫 라벨만 140ms 가 걸렸다
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            _ = RunningApps.current()
+            if GlassSnapshots.wanted { GlassSnapshots.retake() }
         }
     }
 
@@ -224,13 +237,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 라벨을 찾는 동안 유리 라벨이 굴절시킬 화면을 찍어둔다 (오버레이가 뜨기 전).
         // 라벨에서 바로 넘어갈 때는 라벨이 아직 떠 있어서 찍지 않고, 라벨을 열 때 찍은 것을 그대로 쓴다.
         if kind != .search && ready == nil && handoff == nil { GlassSnapshots.retake() }
+        Timing.detail("캡처 요청")
         openToken += 1
         provisional = nil
         prewarmed = nil
         let token = openToken
         buildingToken = token
         let builder = TreeBuilder.forFrontmost(front)
+        Timing.detail("빌더 1")
         let scrollBuilder = kind == .labels ? TreeBuilder.forFrontmost(front) : nil
+        Timing.detail("빌더 2")
         let pid = front.processIdentifier
         if let ready {
             Timing.mark("미리 찾은 영역으로 [\(ready.bundleID ?? "?")] (\(ready.areas.count)개)")
@@ -270,8 +286,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.presentScroll(snapshot)
                 }
             case .labels, .search:
+                let began = CACurrentMediaTime()
                 let snapshot = builder.clickSnapshot()
+                let ended = CACurrentMediaTime()
                 DispatchQueue.main.async {
+                    Timing.detail("찾기 시작", at: began)
+                    Timing.detail("찾기 끝", at: ended)
                     Timing.mark("대상 찾기(\(snapshot.elements.count)개)")
                     if self.buildingToken == token { self.buildingToken = nil }
                     guard token == self.openToken else { return }
@@ -291,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let screen = Screens.screen(for: snapshot.anchor)
         let mode = ClickMode(targets: snapshot.elements, kind: kind == .search ? .search : .labels, screen: screen)
+        Timing.detail("라벨 준비")
         mode.onScroll = { [weak self, weak mode] event in
             guard let self, let mode else { return }
             Timing.begin("스크롤 모드 [\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")] (라벨에서 \(event.charactersIgnoringModifiers ?? "?"))")
@@ -317,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             replace(mode)
         }
         install(mode, kind)
+        Timing.detail("창 띄움")
     }
 
     /// 라벨이 뜬 뒤 뒤에서 스크롤 영역을 미리 찾아 둔다. 라벨에서 j 를 누를 때 찾으면 느리다: 라벨 창을 닫으면 키 포커스가
@@ -669,6 +691,12 @@ enum Timing {
     static func mark(_ name: String) {
         guard let start else { return }
         marks.append("\(name) \(Int((CACurrentMediaTime() - start) * 1000))ms")
+    }
+
+    /// 자세히 재기(설정 profile 또는 HANMIUM_PROFILE)일 때만 남기는 표시. at: 다른 스레드에서 잰 시각.
+    static func detail(_ name: String, at time: CFTimeInterval? = nil) {
+        guard Profile.enabled, let start else { return }
+        marks.append("\(name) \(Int(((time ?? CACurrentMediaTime()) - start) * 1000))ms")
     }
 
     static func finish(_ name: String) {

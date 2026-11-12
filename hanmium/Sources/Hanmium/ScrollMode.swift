@@ -633,12 +633,12 @@ final class ScrollMode: Mode {
 
     // MARK: - 휠 보낼 지점 확인
 
-    /// 휠을 보낼 지점 후보. 오른쪽 가장자리(보통 스크롤 막대 자리)가 먼저다: 본문 가운데의 표·코드 블록·임베드가
-    /// 휠을 가로채지 않게. 그런데 Slack 처럼 가장자리가 스크롤 상자 바깥(감싼 틀이나 자체 스크롤 막대)이면
-    /// 거기서는 스크롤되지 않으므로 오른쪽 1/4, 가운데 순서로 넘어간다.
+    /// 휠을 보낼 지점 후보. 가운데가 먼저다: 영역 안이 여러 칸이면 가장자리는 다른 칸일 수 있다(VS Code 의 Claude Code
+    /// 대화창 오른쪽에 Side question 창이 붙어 있을 때 오른쪽 가장자리로 보내서 대화가 움직이지 않았다, 2026-11-12).
+    /// 가운데의 표·코드 블록·임베드가 휠을 가로채 안 움직이면 오른쪽 1/4, 오른쪽 가장자리(보통 스크롤 막대 자리) 순서로 넘어간다.
     private var aimPoints: [CGPoint] {
         let f = current.visibleFrame
-        return [CGPoint(x: f.maxX - 12, y: f.midY), CGPoint(x: f.maxX - f.width / 4, y: f.midY), CGPoint(x: f.midX, y: f.midY)]
+        return [CGPoint(x: f.midX, y: f.midY), CGPoint(x: f.maxX - f.width / 4, y: f.midY), CGPoint(x: f.maxX - 12, y: f.midY)]
     }
 
     private var aimKey: String {

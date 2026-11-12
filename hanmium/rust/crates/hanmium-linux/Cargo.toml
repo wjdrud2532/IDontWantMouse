@@ -1,0 +1,18 @@
+[package]
+name = "hanmium-linux"
+description = "Hanmium 리눅스 백엔드와 실행 파일. AT-SPI 로 클릭 대상·스크롤 영역을 찾고, GNOME Shell 확장(org.hanmium.Shell)으로 그리고 입력을 보낸다."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hanmium"
+path = "src/main.rs"
+
+[dependencies]
+hanmium-core = { path = "../hanmium-core" }
+serde_json.workspace = true
+atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "wrappers", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-util = "0.3"

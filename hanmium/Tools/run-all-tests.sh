@@ -27,6 +27,7 @@ if [ $live = 1 ]; then
     echo; echo "실제 키 시험을 시작합니다. 키보드·마우스에서 손을 떼 주세요 (5초 뒤 시작)"; sleep 5
     run "키보드 규칙 실제 키 (live-keys)" Tools/live-keys.sh
     run "라벨·스크롤 모드 실제 키 (live-modes)" Tools/live-modes.sh
+    run "라벨 뜨는 시간 (live-latency, 앱·사이트)" Tools/live-latency.sh
     run "WezTerm 스크롤 모드 Enter·Esc (e2e-wezterm)" Tools/e2e-wezterm.sh
 fi
 echo; echo "━━ 결과"; printf "$results\n"

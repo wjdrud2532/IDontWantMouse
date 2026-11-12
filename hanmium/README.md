@@ -283,6 +283,7 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 | `Tools/keyboard-fixtures.sh` | 키보드 규칙 엔진 회귀 테스트. Karabiner 에서 옮겨 온 규칙과 같은 모양(`Tools/KeyboardFixtures/rules.json`)에 키 입력을 차례로 넣고 내보내는 키·클릭·포인터 이동이 맞는지 본다. 실제 키를 보내지 않는다 |
 | `Tools/run-all-tests.sh` | 아래 회귀 테스트를 한 번에 돌리고 결과를 모아 보여 준다. `--live` 를 붙이면 실제 키 시험까지 |
 | `Tools/live-keys.sh` | 키보드 규칙을 실제 키 경로로 시험(35개). 바뀐 키·클릭·휠은 앱에 닿기 전에 버리므로 쓰고 있는 창에는 아무것도 들어가지 않는다 |
+| `Tools/live-latency.sh` | 라벨이 뜨는 시간을 실제 앱·사이트에서 잼(앱마다 앞으로 가져와 라벨 4번). 사이트는 프로필을 따로 쓰는 시험용 Chrome 에서 |
 | `Tools/live-modes.sh` | 시험 창을 띄워 라벨·스크롤 모드를 실제 키로 시험(16개: 라벨에서 j 꾹·k, 영역 번호, Shift+H/L/J/K, Shift+G·gg, f, 닫기). 창 아래 진행 막대에 퍼센트·개수·지금 시험 이름 |
 | `Tools/wezterm-fixtures.sh` | WezTerm 패널 배치 회귀 테스트. 틀렸던 CLI 출력(화면을 옮긴 뒤 남은 픽셀 값 등)과 창 크기를 `Tools/WezTermFixtures/cases` 에 남겨 두고, 계산한 패널 영역이 화면에서 확인한 값과 같은지 본다. 화면·WezTerm 을 건드리지 않는다 |
 | `defaults write com.local.Hanmium profile -bool true` | 라벨 찾기 단계별 시간을 로그에 남긴다 (끄기: `defaults delete com.local.Hanmium profile`) |

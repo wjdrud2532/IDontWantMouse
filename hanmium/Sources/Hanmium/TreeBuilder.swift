@@ -54,21 +54,18 @@ final class TreeBuilder {
     private let screenScales: WezTerm.ScreenScales
 
     private var targets: [Element] = []
+    /// 접근성 위치가 깨진 사이트의 웹 영역은 훑지 않는다(ChromeJS 로 대신 묻는다)
+    private var skipWebArea = false
     private var seenFrames = Set<FrameKey>()
     private(set) var visited = 0
     private let maxVisited = 6000
 
     /// NSWorkspace / NSScreen 은 메인 스레드에서 읽어 넘긴다.
     static func forFrontmost(_ running: NSRunningApplication) -> TreeBuilder {
-        let apps = NSWorkspace.shared.runningApplications
-        let extraPids = apps
-            .filter { $0.activationPolicy != .prohibited || alwaysExtrasApps.contains($0.bundleIdentifier ?? "") }
-            .map(\.processIdentifier)
-        let dockHidden = UserDefaults(suiteName: "com.apple.dock")?.bool(forKey: "autohide") ?? false
-        let dockPid = apps.first { $0.bundleIdentifier == "com.apple.dock" }?.processIdentifier
+        let apps = RunningApps.current()
         return TreeBuilder(pid: running.processIdentifier, bundleID: running.bundleIdentifier,
-                           screenBounds: Screens.axUnion, extraPids: extraPids,
-                           dockPid: dockHidden ? nil : dockPid, screenScales: .current())
+                           screenBounds: Screens.axUnion, extraPids: apps.extraPids,
+                           dockPid: apps.dockPid, screenScales: .current())
     }
 
     init(pid: pid_t, bundleID: String?, screenBounds: CGRect, extraPids: [pid_t], dockPid: pid_t?,
@@ -113,6 +110,25 @@ final class TreeBuilder {
 
         var snap = Snapshot()
         if let window = focusedWindow() {
+            let place = AXEnabler.webPlace(in: window, app: app, bundleID: bundleID)
+            profile.mark("웹 영역 찾기")
+            // 접근성 위치가 깨진 사이트이거나(ChromeJS) 웹 영역이 아직 없으면 페이지를 훑지 않고 페이지에 묻기를 처음부터 함께 돌린다
+            var web: (ref: AXUIElement?, frame: CGRect, host: String?)?
+            var pageTargets: Result<[ChromeJS.Target], ChromeJS.Failure>?
+            let pageQuery = DispatchGroup()
+            if let place, place.frame.width > 50, place.frame.height > 50 {
+                let frame = place.frame
+                web = (place.web, frame, place.web.flatMap(AXEnabler.host(of:)))
+                if place.web == nil || web?.host.map(AXEnabler.brokenHosts.contains) == true {
+                    skipWebArea = true
+                    pageQuery.enter()
+                    DispatchQueue.global(qos: .userInteractive).async {
+                        pageTargets = ChromeJS.targets(pid: self.pid, webArea: frame)
+                        pageQuery.leave()
+                    }
+                }
+            }
+            defer { skipWebArea = false }
             let w = Element.fetch(window, clip: screenBounds)
             snap.anchor = w?.frame
             walk(window, clip: screenBounds, depth: 0, owner: nil)
@@ -124,6 +140,29 @@ final class TreeBuilder {
                 walk(front.ref, clip: screenBounds, depth: 0, owner: nil)
             }
             profile.mark("위에 뜬 창 훑기")
+            // Chrome 이 페이지 요소 위치를 잘못 줘서(ChromeJS 설명) 페이지 링크를 하나도 못 찾았으면 페이지에 직접 묻는다
+            if let web, let w, !targets.contains(where: { $0.role == "AXLink" }) {
+                if skipWebArea {
+                    pageQuery.wait()
+                } else {
+                    pageTargets = ChromeJS.targets(pid: pid, webArea: web.frame)
+                }
+                switch pageTargets ?? .failure(.failed("묻지 않음")) {
+                case .success(let found):
+                    let webFrame = web.frame
+                    targets.removeAll { webFrame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+                    targets += found.map { Element.region($0.rect, in: w, role: $0.role, title: $0.title) }
+                    if !skipWebArea, let host = web.host, found.contains(where: { $0.role == "AXLink" }) {
+                        AXEnabler.brokenHosts.insert(host)
+                        Log.write("Chrome: \(host) 는 접근성 위치가 깨져 페이지에 직접 물음 → 대상 \(found.count)개 (다음부터 바로 묻는다)")
+                    }
+                case .failure(.disabled):
+                    Log.write("Chrome: 페이지에 직접 물으려면 Chrome 의 '보기 › 개발자 정보 › Apple Events 의 JavaScript 허용'을 켜야 합니다")
+                case .failure(.failed(let why)):
+                    Log.write("Chrome: 페이지에 직접 묻지 못함: \(why.prefix(200))")
+                }
+                profile.mark("Chrome 페이지에 묻기")
+            }
             // WezTerm 은 분할 패널을 AX 로 알려주지 않아서 wezterm cli 의 배치로 패널마다 라벨을 단다
             if bundleID == WezTerm.bundleID, let w {
                 let cli = wez?.wait() ?? (panes: WezTerm.panes(), focused: nil)
@@ -132,7 +171,11 @@ final class TreeBuilder {
                 profile.mark("WezTerm 패널")
             }
         }
-        group.wait()
+group.wait()
+        if let bundleID, AXEnabler.chromiumBrowsers.contains(bundleID),
+           !targets.contains(where: { $0.role == "AXLink" }), let window = focusedWindow() {
+            Log.write("Chrome: 페이지 링크를 하나도 찾지 못함 (대상 \(targets.count)개) " + AXEnabler.describeWeb(window))
+        }
         profile.mark("메뉴 막대·상태 아이콘·Dock 기다림")
         // 메뉴가 열려 있으면 메뉴 항목만 대상으로 한다 (드물어서 창은 미리 훑어 두고 버린다)
         if !side.menus.isEmpty {
@@ -212,6 +255,7 @@ final class TreeBuilder {
         var childClip = clip
         if hasFrame && Self.clippingRoles.contains(role) { childClip = clip.intersection(e.frame) }
 
+        if role == "AXWebArea", skipWebArea { return }
         if role == "AXWebArea", Config.useSearchPredicate, let found = searchWebArea(ref) {
             for w in Self.fetchAll(found, clip: childClip) where w.enabled && w.isVisible && !Self.isWebContainer(w) {
                 add(w)
@@ -377,6 +421,7 @@ final class TreeBuilder {
         var snap = ScrollSnapshot(pid: pid, bundleID: bundleID)
         snap.keyWindow = AX.element(AX.copy(app, kAXFocusedWindowAttribute))
         let focused = snap.keyWindow ?? focusedWindow()
+        if let focused { _ = AXEnabler.webPlace(in: focused, app: app, bundleID: bundleID) }
         var refs = AX.elements(AX.copy(app, kAXWindowsAttribute))
         if refs.isEmpty, let focused { refs = [focused] }
 
@@ -493,6 +538,7 @@ final class TreeBuilder {
         for a in areas where !unique.contains(where: { $0.visibleFrame.isClose(to: a.visibleFrame, tolerance: 8) }) {
             unique.append(a)
         }
+
         // 다른 후보 안에 들어 있고 그 70% 넘게 덮는 후보는 뺀다 (패널과 그 안의 목록처럼 같은 곳이 두 번 잡히지 않게).
         // 휠은 가까운 스크롤 가능한 조상으로 가므로 바깥 것만 남겨도 같은 곳이 스크롤된다.
         let size = { (r: CGRect) in r.width * r.height }
@@ -737,13 +783,202 @@ enum AXEnabler {
     /// TreeBuilder 의 직렬 큐에서만 부른다. 이번에 처음 켰으면 true.
     @discardableResult
     static func enable(app: AXUIElement, pid: pid_t, bundleID: String?) -> Bool {
-        guard enabled.insert(pid).inserted else { return false }
+        let first = enabled.insert(pid).inserted
+        if let bundleID, chromiumBrowsers.contains(bundleID) {
+            // 막 켠 Chrome 은 처음 켜 달라는 것을 무시하고, 다시 켜면(재시작) 꺼져 있다. 매번 보고 꺼져 있으면 다시 켠다.
+            if AX.bool(AX.copy(app, "AXEnhancedUserInterface")) != true { turnOn(app) }
+            return first
+        }
+        guard first else { return false }
         let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         // AXEnhancedUserInterface 는 창 관리자 애니메이션을 느리게 하므로 꼭 필요할 때만 켠다
         if manual != .success, let bundleID, chromiumBrowsers.contains(bundleID) {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }
         return true
+    }
+
+    /// Chrome 이 버린 웹 페이지 트리를 다시 만들 때까지 잠깐 기다린다. 다시 켜 달라고 한 직후에는 웹 영역이 아직 없다
+    /// (처음 물으면 탭·툴바만 나오고 0.1~0.5초 뒤에 페이지가 생긴다). 웹 영역이 있으면 바로 돌아온다.
+    /// 브라우저가 앞으로 왔을 때(라벨을 열기 전): 접근성을 켜 두고, 위치가 깨진 사이트면 Chrome 과 Apple Event 연결도 미리 맺는다.
+    /// TreeBuilder 의 직렬 큐에서 부른다.
+    static func warmUp(pid: pid_t, bundleID: String) {
+        let app = AXUIElementCreateApplication(pid)
+        enable(app: app, pid: pid, bundleID: bundleID)
+        guard let window = AX.element(AX.copy(app, kAXFocusedWindowAttribute)),
+              let place = webPlace(in: window, app: app, bundleID: bundleID),
+              place.web == nil || place.web.flatMap(host(of:)).map(brokenHosts.contains) == true else { return }
+        _ = ChromeJS.run(pid: pid, javascript: "0")
+    }
+
+    /// Chrome 접근성 켜기. Chrome 157 은 AXManualAccessibility 를 지원하지 않아 AXEnhancedUserInterface 로 켠다.
+    static func turnOn(_ app: AXUIElement) {
+        if AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue) != .success {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+    }
+
+    /// Chrome 은 한동안 접근성 요청이 없으면 웹 페이지 트리를 버린다(Chrome 157, 2026-11-12: 라벨이 탭·툴바에만 떴다).
+    /// 웹 영역이 없으면 다시 켜 달라고 하고 생길 때까지 기다린다(보통 0.1~0.5초). 있으면 바로 돌아온다(위치가 깨진 페이지도
+    /// 기다리지 않는다: 기다려도 오지 않고, 뒤에서 페이지에 직접 묻는다 — ChromeJS).
+    /// 페이지가 놓인 자리. 웹 영역이 있으면 그것, 없으면(Chrome 이 버렸거나 막 켜서 아직 — 다시 만드는 데 0.1~3초) 다시 켜 달라고
+    /// 하고 페이지를 담는 틀(ContentsContainerView, 웹 영역과 같은 자리)을 돌려준다. 기다리지 않는다: 페이지 대상은 그 틀 위치로
+    /// 페이지에 직접 묻는다(ChromeJS).
+    static func webPlace(in window: AXUIElement, app: AXUIElement, bundleID: String?) -> (web: AXUIElement?, frame: CGRect)? {
+        guard let bundleID, chromiumBrowsers.contains(bundleID) else { return nil }
+        // Chrome 은 늘 페이지 틀(ContentsContainerView) › 스크롤 영역 › 웹 영역이라 틀부터 찾고 두 단계만 내려간다(2~5ms)
+        if let box = findContentsContainer(window), let frame = AX.frame(box) {
+            if let web = webArea(under: box) { return (web, AX.frame(web) ?? frame) }
+            turnOn(app)
+            Log.write("Chrome: 웹 페이지 접근성 트리가 없어 다시 켜고, 페이지에 직접 물음")
+            return (nil, frame)
+        }
+        // 틀이 없는 크로미엄 계열(구조가 다른 브라우저)
+        if let web = findWebArea(window, app: app), let frame = AX.frame(web) { return (web, frame) }
+        turnOn(app)
+        return nil
+    }
+
+    /// 틀 아래 두 단계 안의 내용이 든 웹 영역
+    private static func webArea(under box: AXUIElement) -> AXUIElement? {
+        var level = AX.elements(AX.copy(box, kAXChildrenAttribute))
+        for _ in 0..<3 {
+            var next: [AXUIElement] = []
+            for ref in level {
+                let v = AX.multi(ref, [kAXRoleAttribute, kAXChildrenAttribute])
+                let kids = AX.elements(v[1])
+                if AX.string(v[0]) == "AXWebArea" { return kids.isEmpty ? nil : ref }
+                next += kids
+            }
+            level = next
+        }
+        return nil
+    }
+
+    /// 창마다 찾아 둔 페이지 틀. 탭을 바꿔도 같은 틀이다.
+    private static var lastContainer: (window: AXUIElement, box: AXUIElement)?
+
+    /// 페이지를 담는 틀: DOM 클래스가 ContentsContainerView 인 묶음. 창 넓이의 1/5 넘는 큰 요소 쪽으로만 내려간다.
+    static func findContentsContainer(_ window: AXUIElement) -> AXUIElement? {
+        if let last = lastContainer, CFEqual(last.window, window), let f = AX.frame(last.box), f.width > 50 { return last.box }
+        let windowArea = AX.frame(window).map { $0.width * $0.height } ?? 0
+        var stack = [(window, 0)]
+        var seen = 0
+        while let (ref, depth) = stack.popLast(), seen < 80 {
+            seen += 1
+            let v = AX.multi(ref, ["AXDOMClassList", kAXChildrenAttribute])
+            if ((v[0] as? [String]) ?? []).contains("ContentsContainerView") {
+                lastContainer = (window, ref)
+                return ref
+            }
+            guard depth < 10 else { continue }
+            for c in AX.elements(v[1]) {
+                if let f = AX.frame(c), f.width * f.height >= windowArea * 0.2 { stack.append((c, depth + 1)) }
+            }
+        }
+        return nil
+    }
+
+    /// 접근성 위치가 깨진 사이트(호스트). 다음부터는 페이지를 접근성으로 훑지 않고 처음부터 페이지에 직접 묻는다.
+    /// 설정에 남겨 Hanmium 을 다시 띄워도 첫 번째부터 빠르게.
+    static var brokenHosts = Set(Config.defaults.stringArray(forKey: "chromeBrokenHosts") ?? []) {
+        didSet { Config.defaults.set(Array(brokenHosts).sorted(), forKey: "chromeBrokenHosts") }
+    }
+
+    static func host(of web: AXUIElement) -> String? {
+        (AX.copy(web, "AXURL") as? URL)?.host ?? (AX.copy(web, "AXURL") as? NSURL)?.host
+    }
+
+    /// 창 안의 웹 영역(내용이 든 것). 탭·툴바·북마크 줄을 다 훑으면 40ms 가 들어서, 창 넓이의 1/5 넘는 큰 요소 쪽으로만
+    /// 내려간다(웹 영역은 창 대부분을 차지한다).
+    /// 창마다 지난번에 찾은 웹 영역. 탭을 바꾸면 다른 웹 영역이 되므로 아직 이 창에 붙어 있고 내용이 있는지 보고 쓴다.
+    private static var lastWebArea: (window: AXUIElement, web: AXUIElement)?
+
+    static func findWebArea(_ window: AXUIElement, app: AXUIElement? = nil) -> AXUIElement? {
+        if let last = lastWebArea, CFEqual(last.window, window), stillShown(last.web, in: window) { return last.web }
+        let found = searchWebArea(window, app: app)
+        if let found { lastWebArea = (window, found) }
+        return found
+    }
+
+    /// 웹 영역이 아직 이 창 안에 보이는지: 부모를 따라 올라가 이 창에 닿고, 내용이 있다. 뒤로 간 탭의 웹 영역은 창에서 떨어진다.
+    private static func stillShown(_ web: AXUIElement, in window: AXUIElement) -> Bool {
+        let v = AX.multi(web, [kAXChildrenAttribute, kAXParentAttribute])
+        guard !AX.elements(v[0]).isEmpty else { return false }
+        var node = AX.element(v[1])
+        for _ in 0..<20 {
+            guard let n = node else { return false }
+            if CFEqual(n, window) { return true }
+            node = AX.element(AX.copy(n, kAXParentAttribute))
+        }
+        return false
+    }
+
+    private static func searchWebArea(_ window: AXUIElement, app: AXUIElement?) -> AXUIElement? {
+        // 키보드 포커스는 대개 페이지 안에 있어서 부모를 몇 번 따라 올라가면 웹 영역이다(AX 몇 번, 1~3ms)
+        if let app, var node = AX.element(AX.copy(app, kAXFocusedUIElementAttribute)) {
+            for _ in 0..<40 {
+                let v = AX.multi(node, [kAXRoleAttribute, kAXParentAttribute, kAXChildrenAttribute])
+                if AX.string(v[0]) == "AXWebArea" {
+                    // 페이지 안의 iframe 웹 영역일 수 있어 맨 바깥 것까지 올라간다
+                    var top = node
+                    var up = AX.element(v[1])
+                    while let u = up {
+                        let uv = AX.multi(u, [kAXRoleAttribute, kAXParentAttribute])
+                        if AX.string(uv[0]) == "AXWebArea" { top = u }
+                        if AX.string(uv[0]) == "AXWindow" { break }
+                        up = AX.element(uv[1])
+                    }
+                    return AX.elements(AX.copy(top, kAXChildrenAttribute)).isEmpty ? nil : top
+                }
+                if AX.string(v[0]) == "AXWindow" { break }
+                guard let parent = AX.element(v[1]) else { break }
+                node = parent
+            }
+        }
+        let wv = AX.multi(window, [kAXSizeAttribute])
+        let windowArea = AX.size(wv[0]).map { $0.width * $0.height } ?? 0
+        var stack = [(window, 0)]
+        var seen = 0
+        while let (ref, depth) = stack.popLast(), seen < 200 {
+            seen += 1
+            let v = AX.multi(ref, [kAXRoleAttribute, kAXChildrenAttribute])
+            let children = AX.elements(v[1])
+            if AX.string(v[0]) == "AXWebArea" { return children.isEmpty ? nil : ref }
+            guard depth < 16 else { continue }
+            var big: [(AXUIElement, CGFloat)] = []
+            for c in children {
+                let sz = AX.size(AX.multi(c, [kAXSizeAttribute])[0])
+                let area = sz.map { $0.width * $0.height } ?? 0
+                if area >= windowArea * 0.2 { big.append((c, area)) }
+            }
+            // 큰 것부터 보도록 작은 것을 먼저 쌓는다
+            for (c, _) in big.sorted(by: { $0.1 < $1.1 }) { stack.append((c, depth + 1)) }
+        }
+        return nil
+    }
+
+    /// 페이지 링크를 못 찾았을 때 로그에 남길 것: 창 제목, 웹 영역, 링크 수, 높이 1 이하인 링크 수, 몇 개의 위치
+    static func describeWeb(_ window: AXUIElement) -> String {
+        let title = AX.string(AX.copy(window, kAXTitleAttribute)) ?? "?"
+        guard let web = findWebArea(window) else { return "[\(title)] 웹 영역 없음" }
+        let wv = AX.multi(web, [kAXPositionAttribute, kAXSizeAttribute])
+        var links = 0, flat = 0, samples: [String] = []
+        var queue = [web]
+        var seen = 0
+        while !queue.isEmpty, seen < 3000 {
+            let ref = queue.removeFirst()
+            seen += 1
+            let a = AX.multi(ref, [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute])
+            if AX.string(a[0]) == "AXLink", let p = AX.point(a[1]), let s = AX.size(a[2]) {
+                links += 1
+                if s.height <= 1 { flat += 1 }
+                if samples.count < 4 { samples.append("(\(Int(p.x)),\(Int(p.y)) \(Int(s.width))x\(Int(s.height)))") }
+            }
+            queue += AX.elements(a[3])
+        }
+        let area = AX.point(wv[0]).flatMap { o in AX.size(wv[1]).map { "(\(Int(o.x)),\(Int(o.y)) \(Int($0.width))x\(Int($0.height)))" } } ?? "?"
+        return "[\(title.prefix(40))] 웹 영역 \(area), 링크 \(links)개 중 높이 1 이하 \(flat)개, 예 \(samples.joined(separator: " "))"
     }
 }
 
@@ -831,6 +1066,41 @@ enum ExtrasCache {
             asked.removeAll()
             lock.unlock()
             _ = TreeBuilder.queryExtras(pids)
+        }
+    }
+}
+
+/// 상태 아이콘을 물어볼 앱들과 Dock. 모드를 열 때마다 실행 중인 앱을 모두 훑고 Dock 설정을 읽으면 14~17ms 가 들어서
+/// (라벨이 늦게 떴다) 앱이 켜지거나 꺼질 때만 다시 만들고, Dock 자동 숨김은 10초마다만 다시 읽는다. 메인 스레드에서만 쓴다.
+enum RunningApps {
+    private static var cached: (extraPids: [pid_t], dockPid: pid_t?)?
+    private static var dockHidden = false
+    private static var dockReadAt: CFTimeInterval = -100
+    private static var observing = false
+
+    static func current() -> (extraPids: [pid_t], dockPid: pid_t?) {
+        observe()
+        let now = CACurrentMediaTime()
+        if now - dockReadAt > 10 {
+            dockReadAt = now
+            dockHidden = UserDefaults(suiteName: "com.apple.dock")?.bool(forKey: "autohide") ?? false
+        }
+        if cached == nil {
+            let apps = NSWorkspace.shared.runningApplications
+            let extra = apps
+                .filter { $0.activationPolicy != .prohibited || TreeBuilder.alwaysExtrasApps.contains($0.bundleIdentifier ?? "") }
+                .map(\.processIdentifier)
+            cached = (extra, apps.first { $0.bundleIdentifier == "com.apple.dock" }?.processIdentifier)
+        }
+        return (cached!.extraPids, dockHidden ? nil : cached!.dockPid)
+    }
+
+    private static func observe() {
+        guard !observing else { return }
+        observing = true
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { _ in cached = nil }
         }
     }
 }

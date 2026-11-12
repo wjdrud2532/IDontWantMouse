@@ -28,6 +28,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>Chrome 이 페이지 요소 위치를 잘못 줄 때 페이지에 직접 물어 라벨을 붙입니다.</string>
 </dict>
 </plist>
 EOF

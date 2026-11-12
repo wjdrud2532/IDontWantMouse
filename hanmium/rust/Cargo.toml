@@ -1,0 +1,14 @@
+# Hanmium 크로스플랫폼판 (Rust). 운영체제와 상관없는 코어(hanmium-core)와 운영체제별 백엔드로 나눈다.
+# 설계와 진행 상황: PLAN.md
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+serde_json = "1"
+regex = "1"
