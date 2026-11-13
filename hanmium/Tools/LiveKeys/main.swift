@@ -8,6 +8,7 @@
 import Cocoa
 import CoreGraphics
 import IOKit
+import IOKit.hid
 
 let TEST: Int64 = 0x5445_5354
 let HNMK: Int64 = 0x484E_4D4B
@@ -24,6 +25,8 @@ final class Rec {
     var lastReal = Date()
     var ts: (UInt64, UInt64, UInt64)?
     var leaks: [String] = []
+    /// HID 탭에서 본 시험 키의 키보드 표시(칸 87). 보낸 값이 그대로 오는지 확인한다.
+    var seenDevices = Set<UInt64>()
 }
 let rec = Rec()
 
@@ -48,6 +51,9 @@ let rawCB: CGEventTapCallBack = { _, type, event, _ in
     rec.lock.lock()
     if ud == TEST, rec.ts == nil {
         rec.ts = (event.timestamp, mach_absolute_time(), clock_gettime_nsec_np(CLOCK_UPTIME_RAW))
+    }
+    if ud == TEST, type == .keyDown || type == .keyUp || type == .flagsChanged {
+        rec.seenDevices.insert(UInt64(bitPattern: event.getIntegerValueField(serviceField)))
     }
     if ud != TEST && ud != HNMK {
         let isMove = type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged || type == .scrollWheel
@@ -141,9 +147,14 @@ let NP = CGEventFlags(rawValue: 0x100 | CGEventFlags.maskNumericPad.rawValue)
 func plus(_ a: CGEventFlags, _ b: CGEventFlags) -> CGEventFlags { CGEventFlags(rawValue: a.rawValue | b.rawValue) }
 
 func wait(_ s: Double) { usleep(useconds_t(s * 1_000_000)) }
+/// 시험 키를 이 키보드에서 온 것처럼(이벤트의 서비스 ID 칸 87, Hanmium 키보드별 설정 시험). 0 이면 표시 없음.
+var defaultDevice: UInt64 = 0
+var testDevice: UInt64 = 0
+let serviceField = unsafeBitCast(UInt32(87), to: CGEventField.self)
 func key(_ c: UInt16, _ down: Bool, _ f: CGEventFlags = NONE, rep: Bool = false) {
     guard let e = CGEvent(keyboardEventSource: source, virtualKey: c, keyDown: down) else { return }
     e.flags = f
+    if testDevice != 0 { e.setIntegerValueField(serviceField, value: Int64(bitPattern: testDevice)) }
     if rep { e.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
     e.setIntegerValueField(.eventSourceUserData, value: TEST)
     e.post(tap: .cghidEventTap)
@@ -154,6 +165,7 @@ func mod(_ c: UInt16, _ f: CGEventFlags) {
     guard let e = CGEvent(keyboardEventSource: source, virtualKey: c, keyDown: true) else { return }
     e.type = .flagsChanged
     e.flags = f
+    if testDevice != 0 { e.setIntegerValueField(serviceField, value: Int64(bitPattern: testDevice)) }
     e.setIntegerValueField(.eventSourceUserData, value: TEST)
     e.post(tap: .cghidEventTap)
     wait(0.02)
@@ -258,6 +270,59 @@ add("₩ + Space 혼자 → Space", { key(G, true); wait(0.05); key(SP, true); w
 add("[임시 진단] ₩ + Space + 왼⇧ + ; → 9", { key(G, true); wait(0.05); key(SP, true); wait(0.05)
     mod(LSHIFTK, LSHIFT); tap(SEMI, LSHIFT); mod(LSHIFTK, NONE); key(SP, false); key(G, false) },
     expect(["*↓25", "*↑25"]))
+// 키보드별 설정(keyboard.json devices) 시험: § → ₩ 를 걸어 둔 키보드가 연결돼 있으면 그 키보드의 § 는 ₩ 레이어로,
+// 키보드별 설정이 없는 다른 키보드의 § 는 그대로인지 본다(macOS 가 ISO 로 보는 키보드는 왼쪽 위 키가 § = 키 코드 10).
+func connectedKeyboards() -> [(vendor: Int, product: Int, service: UInt64)] {
+    let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
+    return (IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient] ?? []).compactMap { s in
+        guard IOHIDServiceClientConformsTo(s, 1, 6) != 0,
+              let v = (IOHIDServiceClientCopyProperty(s, "VendorID" as CFString) as? NSNumber)?.intValue,
+              let p = (IOHIDServiceClientCopyProperty(s, "ProductID" as CFString) as? NSNumber)?.intValue, v != 0,
+              let id = (IOHIDServiceClientGetRegistryID(s) as? NSNumber)?.uint64Value else { return nil }
+        return (v, p, id)
+    }
+}
+let settingsURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/Hanmium/keyboard.json")
+let deviceSettings = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL))) as? [String: Any])?["devices"]
+    as? [[String: Any]] ?? []
+func identifiers(_ d: [String: Any]) -> (Int, Int)? {
+    let ids = d["identifiers"] as? [String: Any]
+    guard let v = ids?["vendor_id"] as? Int, let p = ids?["product_id"] as? Int else { return nil }
+    return (v, p)
+}
+let keyboards = connectedKeyboards()
+let sectionDevice: UInt64? = deviceSettings.first { d in
+    (d["simple_modifications"] as? [[String: Any]] ?? []).contains {
+        ($0["from"] as? [String: Any])?["key_code"] as? String == "non_us_backslash"
+            && ((($0["to"] as? [[String: Any]])?.first)?["key_code"] as? String) == "grave_accent_and_tilde"
+    }
+}.flatMap(identifiers).flatMap { id in keyboards.first { $0.vendor == id.0 && $0.product == id.1 }?.service }
+let plainDevice: UInt64? = keyboards.first { k in
+    !deviceSettings.contains { identifiers($0).map { $0 == (k.vendor, k.product) } ?? false }
+}?.service
+// HANMIUM_TEST_DEVICE=1234:ABCD (제조사:제품 16진수, 설정 › 키보드별 설정의 키보드 이름 옆 번호) 이면 모든 시험 키를 그 키보드에서 온 것으로 보낸다(그 키보드의 단축키 확인)
+if let want = ProcessInfo.processInfo.environment["HANMIUM_TEST_DEVICE"] {
+    let parts = want.split(separator: ":").compactMap { Int($0, radix: 16) }
+    if parts.count == 2, let k = keyboards.first(where: { $0.vendor == parts[0] && $0.product == parts[1] }) {
+        defaultDevice = k.service
+    } else {
+        print("HANMIUM_TEST_DEVICE=\(want) 키보드가 연결돼 있지 않음"); exit(2)
+    }
+}
+testDevice = defaultDevice
+if defaultDevice != 0 { print(String(format: "시험 키를 키보드 0x%llx 에서 온 것으로 보냄", defaultDevice)) }
+let SECTION: UInt16 = 10
+if let sectionDevice {
+    add("키보드별 § → ₩: § 혼자 → ₩", { testDevice = sectionDevice; tap(SECTION); testDevice = defaultDevice },
+        expect(["*↓50", "*↑50"]))
+    add("키보드별 § → ₩: § + h j → ← ↓", { testDevice = sectionDevice; key(SECTION, true); wait(0.05); tap(H); tap(J)
+        key(SECTION, false); testDevice = defaultDevice }, expect(["*↓123", "*↑123", "*↓125", "*↑125"]))
+}
+if let plainDevice {
+    add("키보드별 설정 없는 키보드: § 그대로", { testDevice = plainDevice; tap(SECTION); testDevice = defaultDevice },
+        expect(["=↓10", "=↑10"]))
+}
 add("₩ + Tab → Tab", { key(G, true); wait(0.05); tap(TAB); key(G, false) }, expect(["*↓48", "*↑48"]))
 add("₩ + ⌥h / ⌥l → 왼쪽·오른쪽 클릭", { key(G, true); wait(0.05); mod(LOPTK, LOPT); tap(H, LOPT); wait(0.05); tap(L, LOPT)
     mod(LOPTK, NONE); key(G, false); wait(0.1) }, expect(["*M1↓", "*M1↑", "*M2↓", "*M2↑"]))
@@ -386,6 +451,10 @@ DispatchQueue.global().async {
     wait(0.5)
     rec.lock.lock(); rec.dropping = false; let ts = rec.ts; rec.lock.unlock()
     if let ts { print("시각 단위: event.timestamp=\(ts.0) mach=\(ts.1) uptime_ns=\(ts.2)") }
+    rec.lock.lock()
+    let seen = rec.seenDevices.map { String(format: "0x%llx", $0) }.sorted()
+    rec.lock.unlock()
+    print("시험 키의 키보드 표시(칸 87): \(seen.joined(separator: ", "))")
     print("통과 \(pass) · 실패 \(fail) · 건너뜀 \(skipped)")
     exit(fail == 0 && skipped == 0 ? 0 : 1)
 }

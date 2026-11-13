@@ -56,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.openSettings = openSettings
     }
 
+    /// 키보드별 단순 바꾸기(UserKeyMapping)는 시스템에 남으므로 끌 때 걷는다
+    func applicationWillTerminate(_ notification: Notification) {
+        KeyboardDevices.shared.restore()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         replaceOtherInstances()
         let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

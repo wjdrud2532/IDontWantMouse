@@ -16,6 +16,9 @@ final class KeyboardUI: ObservableObject {
     @Published var karabinerRules = 0
     @Published var karabinerDisabled = 0
     @Published var lastKey = ""
+    /// 키보드 그림에서 고른 키(키보드별 설정)
+    @Published var layoutDevice: KeyboardIdentity?
+    @Published var layoutKey: String?
 
     func refreshKarabiner() {
         karabinerRules = KeyboardStore.karabinerActiveRules()
@@ -161,7 +164,21 @@ private struct RuleRow: View {
                         .help("지원하지 않는 조작은 건너뜁니다")
                 }
                 Spacer()
+                let only = rule.keyboards
+                if !only.isEmpty {
+                    Text(only.map(KeyboardDevices.name(for:)).joined(separator: ", ") + " 만")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Menu {
+                    Menu("적용할 키보드") {
+                        Button { setKeyboards([]) } label: { checkLabel("모든 키보드", only.isEmpty) }
+                        Divider()
+                        ForEach(KeyboardDevicesView.known(), id: \.identity) { k in
+                            Button {
+                                setKeyboards(only.contains(k.identity) ? only.filter { $0 != k.identity } : only + [k.identity])
+                            } label: { checkLabel(k.name, only.contains(k.identity)) }
+                        }
+                    }
                     Button("JSON 편집…") {
                         ui.editingIndex = index
                         ui.text = rule.prettyJSON
@@ -179,6 +196,15 @@ private struct RuleRow: View {
                 .fixedSize()
             }
         }
+    }
+
+    private func setKeyboards(_ ids: [KeyboardIdentity]) {
+        guard store.rules.indices.contains(index) else { return }
+        store.rules[index].setKeyboards(ids)
+    }
+
+    private func checkLabel(_ title: String, _ on: Bool) -> some View {
+        on ? Label(title, systemImage: "checkmark") : Label(title, systemImage: "")
     }
 
     private func move(_ by: Int) {
@@ -290,7 +316,7 @@ struct KeyboardSimpleView: View {
             } header: {
                 Text("키 하나를 다른 키 하나로")
             } footer: {
-                note("모든 키보드에 적용합니다. 키보드 규칙이 먼저 적용되고, 규칙에 걸리지 않은 키만 여기서 바뀝니다. "
+                note("모든 키보드에 적용합니다(키보드마다 따로 바꾸려면 \"키보드별 설정\"). 키보드 규칙이 먼저 적용되고, 규칙에 걸리지 않은 키만 여기서 바뀝니다. "
                     + "수정키(⇧⌃⌥⌘·Caps Lock)는 바꿀 키로 쓸 수 없습니다. 키보드 규칙의 \"Hanmium 이 키보드 규칙으로 키 바꾸기\" 를 켜야 동작합니다.")
             }
             Section("키 확인") {
@@ -384,6 +410,172 @@ struct KeyProbe: NSViewRepresentable {
             ])
             s.draw(at: CGPoint(x: 12, y: (bounds.height - s.size().height) / 2))
         }
+    }
+}
+
+// MARK: - 키보드별 설정
+
+/// 연결된 키보드마다: 키보드 규칙을 쓸지, 그 키보드에서만 바꿀 키
+struct KeyboardDevicesView: View {
+    @ObservedObject var store = KeyboardStore.shared
+    @ObservedObject var devices = KeyboardDevices.shared
+    @ObservedObject var ui = KeyboardUI.shared
+
+    /// 화면에 보일 키보드: 연결된 것 + 설정만 남은 것
+    struct Row {
+        let identity: KeyboardIdentity
+        let name: String
+        let builtIn: Bool
+        let connected: Bool
+        var kind = KeyboardLayout.Kind(apple: false, iso: false)
+    }
+
+    static func known() -> [Row] {
+        let connected = KeyboardDevices.shared.connected
+        var rows = connected.map {
+            Row(identity: $0.identity, name: $0.name, builtIn: $0.builtIn, connected: true,
+                kind: KeyboardLayout.Kind(apple: $0.apple, iso: $0.iso))
+        }
+        for d in KeyboardStore.shared.devices where !rows.contains(where: { $0.identity == d.identity }) {
+            rows.append(Row(identity: d.identity, name: d.name, builtIn: false, connected: false))
+        }
+        return rows
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                note("키보드마다 따로 정합니다. 여기서 바꾸는 키는 그 키보드에만 적용되고, 수정키(⌥ ⌘ 등)도 바꿀 수 있습니다. "
+                    + "바뀐 키에 키보드 규칙이 걸립니다. 규칙 하나를 어떤 키보드에서만 쓰려면 \"키보드 규칙\" 에서 규칙의 … › 적용할 키보드. "
+                    + "\"Hanmium 이 키보드 규칙으로 키 바꾸기\" 를 켜야 동작합니다.")
+            }
+            ForEach(Self.known(), id: \.identity) { row in
+                Section {
+                    Toggle("키보드 규칙 적용", isOn: Binding(
+                        get: { !(settings(row.identity)?.ignore ?? false) },
+                        set: { on in edit(row) { $0.ignore = !on } }))
+                    if row.connected { layout(row) }
+                    let simple = settings(row.identity)?.simple ?? []
+                    ForEach(Array(simple.enumerated()), id: \.element.id) { i, _ in
+                        HStack {
+                            KeyPicker(title: "바꿀 키", selection: binding(row, i, \.from))
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                            KeyPicker(title: "바뀐 키", selection: binding(row, i, \.to))
+                            Spacer()
+                            Button { edit(row) { $0.simple.remove(at: i) } } label: { Image(systemName: "minus.circle.fill") }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack {
+                        Button("바꿀 키 추가") { edit(row) { $0.simple.append(SimpleModification(from: "left_option", to: "left_command")) } }
+                        Spacer()
+                        let rules = store.rules.filter { $0.keyboards.contains(row.identity) }.count
+                        if rules > 0 { Text("이 키보드에만 쓰는 규칙 \(rules)개").font(.caption).foregroundStyle(.secondary) }
+                    }
+                } header: {
+                    HStack {
+                        Text(row.name)
+                        if row.builtIn { Text("내장").foregroundStyle(.secondary) }
+                        if !row.connected { Text("연결 안 됨").foregroundStyle(.secondary) }
+                        Spacer()
+                        Text(String(format: "%04X:%04X", row.identity.vendorID, row.identity.productID))
+                            .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                        if !row.connected, settings(row.identity) != nil {
+                            Button("설정 지우기") { store.devices.removeAll { $0.identity == row.identity } }
+                                .buttonStyle(.borderless).font(.caption)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { devices.refresh() }
+    }
+
+    /// 키보드 그림 + 고른 키 바꾸기 + 범례
+    @ViewBuilder private func layout(_ row: Row) -> some View {
+        let s = settings(row.identity)
+        let mapped = Dictionary((s?.simple ?? []).map { ($0.from, $0.to) }, uniquingKeysWith: { a, _ in a })
+        KeyboardLayoutView(identity: row.identity, kind: row.kind, mapped: mapped,
+                           ruleKeys: ruleKeys(row.identity, ignore: s?.ignore ?? false))
+            .padding(.vertical, 4)
+        if ui.layoutDevice == row.identity, let key = ui.layoutKey {
+            HStack {
+                Text(KeyNames.display(key) + " 키를")
+                KeyPicker(title: "바뀐 키", selection: Binding(
+                    get: { mapped[key] ?? key },
+                    set: { to in setMapping(row, key, to) }))
+                Text("로")
+                Button("원래대로") { setMapping(row, key, key) }.disabled(mapped[key] == nil)
+                Spacer()
+                Button("닫기") { ui.layoutKey = nil; ui.layoutDevice = nil }
+            }
+        }
+        HStack(spacing: 14) {
+            legend(Color.accentColor.opacity(0.22), "이 키보드에서 바꾼 키")
+            HStack(spacing: 4) { Circle().fill(Color.orange).frame(width: 7, height: 7); Text("키보드 규칙이 쓰는 키") }
+            Text("키를 누르면 바꿀 수 있습니다")
+            Spacer()
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        if row.kind.iso {
+            note("macOS 가 이 키보드를 ISO 배열로 봅니다: 왼쪽 위 키가 §, 왼쪽 ⇧ 옆 키가 ₩(`) 로 들어옵니다.")
+        }
+    }
+
+    private func legend(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 12, height: 9)
+            Text(text)
+        }
+    }
+
+    /// 그 키보드에서 키보드 규칙이 쓰는 키 → 규칙 설명들
+    private func ruleKeys(_ id: KeyboardIdentity, ignore: Bool) -> [String: [String]] {
+        guard !ignore else { return [:] }
+        var out: [String: [String]] = [:]
+        for rule in store.rules where rule.enabled && (rule.keyboards.isEmpty || rule.keyboards.contains(id)) {
+            for m in rule.manipulators.compactMap({ $0 }) where m.isSupported {
+                guard let k = m.from.keyCode, !(out[k]?.contains(rule.description) ?? false) else { continue }
+                out[k, default: []].append(rule.description)
+            }
+        }
+        return out
+    }
+
+    /// key 를 to 로(같으면 바꾸기를 지운다)
+    private func setMapping(_ row: Row, _ key: String, _ to: String) {
+        edit(row) { s in
+            s.simple.removeAll { $0.from == key }
+            if to != key { s.simple.append(SimpleModification(from: key, to: to)) }
+        }
+    }
+
+    private func settings(_ id: KeyboardIdentity) -> KeyboardDeviceSettings? {
+        store.devices.first { $0.identity == id }
+    }
+
+    /// 그 키보드 설정을 고친다(없으면 만든다). 아무것도 안 남으면 지운다.
+    private func edit(_ row: Row, _ change: (inout KeyboardDeviceSettings) -> Void) {
+        var list = store.devices
+        let i = list.firstIndex { $0.identity == row.identity } ?? {
+            list.append(KeyboardDeviceSettings(identity: row.identity, name: row.name))
+            return list.count - 1
+        }()
+        change(&list[i])
+        list[i].name = row.name
+        if !list[i].ignore && list[i].simple.isEmpty { list.remove(at: i) }
+        store.devices = list
+    }
+
+    private func binding(_ row: Row, _ i: Int, _ key: WritableKeyPath<SimpleModification, String>) -> Binding<String> {
+        Binding(get: {
+            let simple = settings(row.identity)?.simple ?? []
+            return simple.indices.contains(i) ? simple[i][keyPath: key] : ""
+        }, set: { v in
+            edit(row) { s in if s.simple.indices.contains(i) { s.simple[i][keyPath: key] = v } }
+        })
     }
 }
 

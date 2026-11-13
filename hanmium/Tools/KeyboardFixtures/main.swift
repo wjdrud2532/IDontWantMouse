@@ -27,12 +27,60 @@ let arrow = CGEventFlags(rawValue: CGEventFlags.maskNumericPad.rawValue | CGEven
 
 var failures = 0
 var checks = 0
+func expect<T: Equatable>(_ name: String, _ got: T, _ want: T, line: Int = #line) {
+    checks += 1
+    if got != want {
+        failures += 1
+        print("✗ \(name) (줄 \(line))\n    받음: \(got)\n    기대: \(want)")
+    }
+}
 func expect(_ name: String, _ got: [O], _ want: [O], line: Int = #line) {
     checks += 1
     if got != want {
         failures += 1
         print("✗ \(name) (줄 \(line))\n    받음: \(got)\n    기대: \(want)")
     }
+}
+
+// 0. 키보드별 바꾸기(키보드 A: ISO 로 보여 왼쪽 위가 § 인 키보드, § → ₩)·키보드 조건(device_if). 다른 키보드와 모르는 키보드는 그대로.
+do {
+    let kbA = KeyEventSource(identity: KeyboardIdentity(vendorID: 0xFFFE, productID: 0x0001), builtIn: false)
+    let kbB = KeyEventSource(identity: KeyboardIdentity(vendorID: 0xFFFE, productID: 0x0002), builtIn: false)
+    let e = makeEngine()
+    e.rules.deviceKeys = [kbA.identity: [k("non_us_backslash"): k("grave_accent_and_tilde")]]
+    let sec = k("non_us_backslash")
+    expect("키보드 A § 누름(₩ 레이어)", e.keyDown(sec, flags: none, isRepeat: false, time: 0, device: kbA), [])
+    expect("키보드 A § + h → ←", e.keyDown(k("h"), flags: none, isRepeat: false, time: 0.1, device: kbA),
+           [.key(123, down: true, flags: arrow, isRepeat: false)])
+    _ = e.keyUp(k("h"), flags: none, time: 0.2)
+    expect("키보드 A § 뗌", e.keyUp(sec, flags: none, time: 0.3), [])
+    expect("키보드 A § 혼자 → ₩", e.keyDown(sec, flags: none, isRepeat: false, time: 1, device: kbA), [])
+    expect("키보드 A § 혼자 뗌", e.keyUp(sec, flags: none, time: 1.1),
+           [.key(50, down: true, flags: none, isRepeat: false), .key(50, down: false, flags: none, isRepeat: false)])
+    expect("키보드 B § 그대로", e.keyDown(sec, flags: none, isRepeat: false, time: 2, device: kbB), [.pass])
+    expect("키보드 B § 뗌 그대로", e.keyUp(sec, flags: none, time: 2.1), [.pass])
+    expect("모르는 키보드 § 그대로", e.keyDown(sec, flags: none, isRepeat: false, time: 3), [.pass])
+    _ = e.keyUp(sec, flags: none, time: 3.1)
+    // 규칙에 안 걸리는 키를 키보드별로 바꾸면 바꾼 키로(반복·뗌도)
+    e.rules.deviceKeys[kbA.identity]![k("q")] = k("w")
+    expect("키보드 A q → w", e.keyDown(k("q"), flags: none, isRepeat: false, time: 4, device: kbA),
+           [.key(k("w"), down: true, flags: none, isRepeat: false)])
+    expect("키보드 A q 반복 → w", e.keyDown(k("q"), flags: none, isRepeat: true, time: 4.5, device: kbA),
+           [.key(k("w"), down: true, flags: none, isRepeat: true)])
+    expect("키보드 A q 뗌 → w", e.keyUp(k("q"), flags: none, time: 4.6), [.key(k("w"), down: false, flags: none, isRepeat: false)])
+    // device_if: 규칙을 키보드 A 에서만
+    var rule = KeyRule(json: ["description": "키보드 A 에서만 x → y", "manipulators": [
+        ["type": "basic", "from": ["key_code": "x"], "to": [["key_code": "y"]]]]])
+    rule.setKeyboards([kbA.identity])
+    expect("규칙의 키보드", rule.keyboards.map(\.productID), [0x0001])
+    e.rules.manipulators = rule.manipulators.compactMap { $0 } + e.rules.manipulators
+    expect("키보드 A x → y", e.keyDown(k("x"), flags: none, isRepeat: false, time: 5, device: kbA),
+           [.key(k("y"), down: true, flags: none, isRepeat: false)])
+    _ = e.keyUp(k("x"), flags: none, time: 5.1)
+    expect("키보드 B x 그대로", e.keyDown(k("x"), flags: none, isRepeat: false, time: 6, device: kbB), [.pass])
+    _ = e.keyUp(k("x"), flags: none, time: 6.1)
+    rule.setKeyboards([])
+    expect("모든 키보드로 되돌림", rule.keyboards.count, 0)
 }
 
 // 1. ₩ 만 짧게: 뗄 때 ₩

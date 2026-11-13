@@ -24,6 +24,11 @@ final class KeyboardTap {
     /// 이 표시가 붙은 이벤트는 Hanmium 이 보낸 것이라 다시 바꾸지 않는다
     static let marker: Int64 = 0x484E_4D4B  // 'HNMK'
     private let source = CGEventSource(stateID: .privateState)
+    /// 규칙을 쓰지 않는 키보드(lock 안에서)
+    private var ignored = Set<KeyboardIdentity>()
+    /// 키 이벤트를 만든 HID 서비스의 레지스트리 ID 가 든 칸(87, 문서에 없음). 2026-11-13 실측: 외장 키보드 두 대의 키 29개가 모두
+    /// 그 키보드 서비스 ID 와 같았다. 이것으로 어느 키보드인지 안다.
+    static let serviceField = unsafeBitCast(UInt32(87), to: CGEventField.self)
 
     private init() {
         engine.frontmost = { [unowned self] in frontmostID }
@@ -55,15 +60,19 @@ final class KeyboardTap {
     }
 
     /// 규칙이 바뀌거나 켜고 끌 때(메인 스레드)
-    func update(rules: [KeyRule], simple: [SimpleModification], parameters: KeyParameters, enabled: Bool) {
+    func update(rules: [KeyRule], simple: [SimpleModification], parameters: KeyParameters,
+                devices: [KeyboardDeviceSettings], enabled: Bool) {
         var compiled = KeyboardEngine.Rules()
         compiled.manipulators = rules.flatMap { $0.manipulators.compactMap { $0 } }
         for s in simple {
             if let from = KeyNames.code(s.from), let to = KeyNames.code(s.to) { compiled.simple[from] = to }
         }
         compiled.aloneTimeout = Double(parameters.aloneTimeout) / 1000
+        compiled.deviceKeys = Dictionary(devices.filter { !$0.ignore }.map { ($0.identity, $0.keyMap) },
+                                         uniquingKeysWith: { a, _ in a }).filter { !$0.value.isEmpty }
         lock.lock()
         engine.rules = compiled
+        ignored = Set(devices.filter(\.ignore).map(\.identity))
         lock.unlock()
         mouse.pointerScale = Double(parameters.pointerScale) / 100
         mouse.wheelScale = Double(parameters.wheelScale) / 100
@@ -136,11 +145,18 @@ final class KeyboardTap {
         let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let time = Double(event.timestamp) / 1_000_000_000
         let outputs: [KeyboardEngine.Output]
+        let device = type == .keyDown ? KeyboardDevices.shared.source(
+            service: UInt64(bitPattern: event.getIntegerValueField(Self.serviceField))) : nil
         lock.lock()
         switch type {
+        case .keyDown where device.map { ignored.contains($0.identity) } ?? false:
+            // 규칙을 쓰지 않는 키보드: 그대로 보낸다(누르고 있던 키의 to_if_alone 은 다른 키를 누른 것으로 친다)
+            engine.interrupt()
+            outputs = [.pass]
         case .keyDown:
             outputs = engine.keyDown(code, flags: event.flags,
-                                     isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0, time: time)
+                                     isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0, time: time,
+                                     device: device)
         case .keyUp:
             outputs = engine.keyUp(code, flags: event.flags, time: time)
         case .flagsChanged:

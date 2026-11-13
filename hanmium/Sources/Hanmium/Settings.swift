@@ -162,10 +162,10 @@ struct SettingsView: View {
     /// 키보드(규칙·단순 바꾸기·매개변수: Karabiner-Elements 와 같은 방식)
     enum Tab: String, CaseIterable {
         case general = "일반", labels = "라벨", scroll = "스크롤"
-        case keyRules = "키보드 규칙", keySimple = "단순 바꾸기", keyParams = "키보드 매개변수"
+        case keyRules = "키보드 규칙", keySimple = "단순 바꾸기", keyDevices = "키보드별 설정", keyParams = "키보드 매개변수"
 
         static let hanmium: [Tab] = [.general, .labels, .scroll]
-        static let keyboard: [Tab] = [.keyRules, .keySimple, .keyParams]
+        static let keyboard: [Tab] = [.keyRules, .keySimple, .keyDevices, .keyParams]
 
         var icon: String {
             switch self {
@@ -174,6 +174,7 @@ struct SettingsView: View {
             case .scroll: "scroll"
             case .keyRules: "list.bullet.rectangle"
             case .keySimple: "arrow.left.arrow.right"
+            case .keyDevices: "keyboard"
             case .keyParams: "slider.horizontal.3"
             }
         }
@@ -225,6 +226,7 @@ struct SettingsView: View {
         case .scroll: Form { scrollTab }.formStyle(.grouped)
         case .keyRules: KeyboardRulesView()
         case .keySimple: KeyboardSimpleView()
+        case .keyDevices: KeyboardDevicesView()
         case .keyParams: KeyboardParamsView()
         }
     }

@@ -14,6 +14,16 @@ pub trait Shell {
     fn click(&self, x: f64, y: f64, button: u32) -> zbus::Result<()>;
     fn scroll(&self, x: f64, y: f64, dx: f64, dy: f64) -> zbus::Result<()>;
     fn move_pointer(&self, x: f64, y: f64) -> zbus::Result<()>;
+    fn key_focus(&self, on: bool) -> zbus::Result<bool>;
+    fn pointer(&self) -> zbus::Result<(f64, f64)>;
+    fn scroll_params(&self, json: &str) -> zbus::Result<()>;
+    fn scroll_aim(&self, x: f64, y: f64) -> zbus::Result<()>;
+    fn scroll_hold(&self, id: u32, dx: f64, dy: f64) -> zbus::Result<()>;
+    fn scroll_release(&self, id: u32) -> zbus::Result<()>;
+    fn scroll_page(&self, id: u32, dx: f64, dy: f64, cdx: f64, cdy: f64) -> zbus::Result<()>;
+    fn scroll_jump(&self, dy: f64) -> zbus::Result<()>;
+    fn scroll_stop(&self) -> zbus::Result<()>;
+    fn send_keys(&self, json: &str) -> zbus::Result<()>;
     fn test_key(&self, keycode: u32, pressed: bool) -> zbus::Result<()>;
     fn screenshot(&self, path: &str) -> zbus::Result<bool>;
     #[zbus(signal)]
@@ -38,6 +48,16 @@ impl Rect {
     pub fn center(&self) -> (f64, f64) {
         (self.x + self.w / 2.0, self.y + self.h / 2.0)
     }
+    /// 겹치는 부분 (안 겹치면 그대로)
+    pub fn clip(&self, o: &Rect) -> Rect {
+        let (x0, y0) = (self.x.max(o.x), self.y.max(o.y));
+        let (x1, y1) = ((self.x + self.w).min(o.x + o.w), (self.y + self.h).min(o.y + o.h));
+        if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+            return *self;
+        }
+        Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+
     pub fn intersects(&self, o: &Rect) -> bool {
         self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
     }

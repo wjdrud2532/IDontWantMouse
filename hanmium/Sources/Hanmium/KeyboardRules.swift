@@ -197,13 +197,33 @@ struct KeyCondition: Decodable {
     var name: String?
     var value: KeyVarValue?
     var bundleIdentifiers: [String]?
+    /// device_if·device_unless 의 키보드들
+    var identifiers: [DeviceIdentifier]?
 
     enum CodingKeys: String, CodingKey {
-        case type, name, value, bundleIdentifiers = "bundle_identifiers"
+        case type, name, value, bundleIdentifiers = "bundle_identifiers", identifiers
     }
 
     static let supported: Set<String> = ["variable_if", "variable_unless", "frontmost_application_if",
-                                         "frontmost_application_unless"]
+                                         "frontmost_application_unless", "device_if", "device_unless"]
+}
+
+/// 조건 device_if 의 키보드 하나(Karabiner 의 identifiers). 적힌 것이 모두 맞아야 그 키보드다.
+struct DeviceIdentifier: Decodable, Equatable {
+    var vendorID: Int?
+    var productID: Int?
+    var isKeyboard: Bool?
+    var isBuiltInKeyboard: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case vendorID = "vendor_id", productID = "product_id", isKeyboard = "is_keyboard",
+             isBuiltInKeyboard = "is_built_in_keyboard"
+    }
+
+    func matches(_ d: KeyEventSource) -> Bool {
+        (vendorID == nil || vendorID == d.identity.vendorID) && (productID == nil || productID == d.identity.productID)
+            && isKeyboard != false && (isBuiltInKeyboard == nil || isBuiltInKeyboard == d.builtIn)
+    }
 }
 
 struct KeyManipulator: Decodable {
@@ -269,6 +289,24 @@ struct KeyRule: Identifiable {
                   let data = try? JSONSerialization.data(withJSONObject: item) else { return nil }
             return try? JSONDecoder().decode(KeyManipulator.self, from: data)
         }
+    }
+
+    /// 이 규칙을 쓰는 키보드(모든 조작에 같은 device_if 를 단다). 비어 있으면 모든 키보드.
+    var keyboards: [KeyboardIdentity] {
+        let list = json["manipulators"] as? [[String: Any]] ?? []
+        guard let conds = list.first?["conditions"] as? [[String: Any]],
+              let c = conds.first(where: { $0["type"] as? String == "device_if" }) else { return [] }
+        return (c["identifiers"] as? [[String: Any]] ?? []).compactMap { KeyboardIdentity(json: $0) }
+    }
+
+    mutating func setKeyboards(_ ids: [KeyboardIdentity]) {
+        guard var list = json["manipulators"] as? [[String: Any]] else { return }
+        for i in list.indices {
+            var conds = (list[i]["conditions"] as? [[String: Any]] ?? []).filter { $0["type"] as? String != "device_if" }
+            if !ids.isEmpty { conds.append(["type": "device_if", "identifiers": ids.map(\.json)]) }
+            if conds.isEmpty { list[i].removeValue(forKey: "conditions") } else { list[i]["conditions"] = conds }
+        }
+        json["manipulators"] = list
     }
 
     static func parse(_ text: String) throws -> KeyRule {
@@ -341,6 +379,8 @@ final class KeyboardStore: ObservableObject {
 
     @Published var rules: [KeyRule] = [] { didSet { changed() } }
     @Published var simple: [SimpleModification] = [] { didSet { changed() } }
+    /// 키보드별 설정(단순 바꾸기·규칙 적용 안 함)
+    @Published var devices: [KeyboardDeviceSettings] = [] { didSet { changed() } }
     @Published var parameters = KeyParameters() { didSet { changed() } }
     /// 키 바꾸기 전체 켜기. 처음에는 꺼 둔다(Karabiner 와 겹치지 않게 사용자가 켠다).
     @Published var enabled: Bool = Config.defaults.bool(forKey: "keyboardEnabled") {
@@ -382,6 +422,7 @@ final class KeyboardStore: ObservableObject {
     private func read(_ object: [String: Any]) {
         rules = (object["rules"] as? [[String: Any]] ?? []).map { KeyRule(json: $0) }
         simple = Self.simpleList(object["simple_modifications"])
+        devices = (object["devices"] as? [[String: Any]] ?? []).compactMap(KeyboardDeviceSettings.init(json:))
         let p = object["parameters"] as? [String: Any] ?? [:]
         var params = KeyParameters()
         if let v = p[KeyParameters.aloneKey] as? Int { params.aloneTimeout = v }
@@ -390,7 +431,7 @@ final class KeyboardStore: ObservableObject {
         parameters = params
     }
 
-    private static func simpleList(_ value: Any?) -> [SimpleModification] {
+    static func simpleList(_ value: Any?) -> [SimpleModification] {
         (value as? [[String: Any]] ?? []).compactMap { item in
             guard let from = (item["from"] as? [String: Any])?["key_code"] as? String,
                   let to = ((item["to"] as? [[String: Any]])?.first)?["key_code"] as? String else { return nil }
@@ -402,6 +443,7 @@ final class KeyboardStore: ObservableObject {
         [
             "rules": rules.map(\.json),
             "simple_modifications": simple.map { ["from": ["key_code": $0.from], "to": [["key_code": $0.to]]] },
+            "devices": devices.map(\.json),
             "parameters": [KeyParameters.aloneKey: parameters.aloneTimeout,
                            KeyParameters.pointerKey: parameters.pointerScale,
                            KeyParameters.wheelKey: parameters.wheelScale],
@@ -428,7 +470,8 @@ final class KeyboardStore: ObservableObject {
 
     func apply() {
         KeyboardTap.shared.update(rules: rules.filter(\.enabled), simple: simple, parameters: parameters,
-                                  enabled: enabled)
+                                  devices: devices, enabled: enabled)
+        KeyboardDevices.shared.apply(devices, enabled: enabled)
     }
 
     // MARK: Karabiner 가져오기
@@ -448,6 +491,12 @@ final class KeyboardStore: ObservableObject {
         loading = true
         rules = (complex["rules"] as? [[String: Any]] ?? []).map { KeyRule(json: Self.convertHotkeys($0)) }
         simple = Self.simpleList(profile["simple_modifications"])
+        devices = (profile["devices"] as? [[String: Any]] ?? []).compactMap { d in
+            let ids = d["identifiers"] as? [String: Any] ?? [:]
+            guard ids["is_keyboard"] as? Bool ?? true, var settings = KeyboardDeviceSettings(json: d) else { return nil }
+            settings.name = KeyboardDevices.shared.connected.first { $0.identity == settings.identity }?.name ?? settings.name
+            return settings
+        }
         var params = KeyParameters()
         let p = complex["parameters"] as? [String: Any] ?? [:]
         if let v = p[KeyParameters.aloneKey] as? Int { params.aloneTimeout = v }

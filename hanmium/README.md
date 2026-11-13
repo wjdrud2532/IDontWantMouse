@@ -56,6 +56,7 @@
   - 계산은 GPU(Metal)로 한다.
   - 라벨이 다 그려지기까지 단축키를 누르고 80ms 안팎.
 - **키보드 규칙**: Karabiner-Elements 의 복합 규칙과 같은 JSON 으로 키를 바꾼다(키 → 키, 레이어, 혼자 누르기, 마우스 키·클릭·휠, Hanmium 모드 열기). Karabiner 설정에서 그대로 가져온다.
+- **키보드별 설정**: 연결된 키보드마다 그림으로 보고 따로 바꾼다(수정키 ⌘⌥ 바꾸기 포함). 규칙을 어떤 키보드에서만 쓰게 할 수도 있다.
 - **앱별 사용**: 특정 앱에서만 끄거나, 특정 앱에서만 켠다. 꺼진 앱이 앞에 있으면 단축키를 놓아서 그 앱이 키를 그대로 받는다.
 - **설정 내보내기·가져오기**: JSON 파일로 옮기거나 되돌린다.
 - **진단**: 앱 호환성 점검, 동작 로그, 단계별 시간 측정.
@@ -235,12 +236,16 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 - **Hanmium 모드 바로 열기**: `{"hanmium": "labels"}` · `"search"` · `"scroll"`. 가져올 때 Hanmium 단축키(예: ⌥Space)를 보내던 조작은 이것으로 바뀐다. 단축키를 거치지 않아서, Hanmium 이 꺼졌거나 그 앱에서 쓰지 않으면 원래 키(예: Tab)가 그대로 간다.
 - **지원하는 것**: `from.key_code` + `modifiers`(mandatory·optional), 조건 `variable_if/unless`·`frontmost_application_if/unless`, `to`·`to_if_alone`·`to_after_key_up` 의 `key_code`(+modifiers)·`pointing_button`(button1–5)·`mouse_key`(x·y·휠·speed_multiplier)·`set_variable`, 매개변수 `basic.to_if_alone_timeout_milliseconds`. 그 밖의 것(`simultaneous`, `shell_command`, `to_if_held_down` 등)이 든 조작은 건너뛰고 목록에 ⚠︎ 로 표시한다.
 - **Karabiner 와 같이 켜 두면**: Karabiner 가 키를 먼저 바꿔서 같은 키의 Hanmium 규칙은 동작하지 않는다. 키보드 규칙 화면의 **Karabiner 복합 규칙 모두 끄기** 로 Karabiner 쪽 규칙의 `enabled` 만 끈다(바꾸기 전 파일은 `karabiner.json.bak-before-hanmium-…` 으로 남고, **다시 켜기** 로 되돌린다).
-- **한계**: macOS 이벤트 탭으로 키를 받는다. 비밀번호 입력처럼 보안 입력이 켜진 동안에는 시스템이 키를 보여 주지 않아 바뀌지 않는다(Karabiner 는 드라이버라서 바뀐다). 수정키 자체(Caps Lock 등)를 다른 키로 바꾸는 것은 아직 안 된다.
+- **키보드별 설정**: 설정 창 › **키보드별 설정**. 연결된 키보드마다 키보드 그림이 나오고, 키를 눌러 그 키보드에서만 다른 키로 바꾼다(파란 키 = 바꾼 키, 주황 점 = 규칙이 쓰는 키). 수정키(⌘ ⌥ ⌃ ⇧ Caps Lock fn)가 낀 바꾸기는 `hidutil` 로 그 키보드에만 `UserKeyMapping` 을 건다(기존 `hidutil property --set` 전체 바꾸기 위에 더함, Hanmium 을 끄면 걷음). 나머지는 규칙보다 먼저 키 코드로 바꾼다. **키보드 규칙 적용** 을 끄면 그 키보드의 키는 건드리지 않고, 규칙의 … › **적용할 키보드** 로 규칙을 고른 키보드에서만 쓴다(Karabiner 의 `device_if`). 키가 어느 키보드에서 왔는지는 키 이벤트의 문서에 없는 칸 87(그 키보드 HID 서비스의 레지스트리 ID)로 안다. 저장은 `keyboard.json` 의 `devices`(Karabiner 와 같은 모양).
+  - macOS 가 ISO 배열로 보는 키보드는 왼쪽 위 키가 `§`(키 코드 10)로 온다. ₩ 레이어를 그 키로 쓰려면 그 키보드에서 § → ₩ 로 바꾼다.
+  - 키보드 안에서만 쓰는 Fn 키(PC 키보드에 흔함)는 Mac 에 신호를 보내지 않아 바꿀 수 없다.
+- **한계**: macOS 이벤트 탭으로 키를 받는다. 비밀번호 입력처럼 보안 입력이 켜진 동안에는 시스템이 키를 보여 주지 않아 바뀌지 않는다(Karabiner 는 드라이버라서 바뀐다). 모든 키보드의 수정키 자체(Caps Lock 등)를 바꾸는 것은 단순 바꾸기로는 안 되고, 키보드별 설정으로 키보드마다 건다.
 
 | 화면 | 하는 일 |
 |---|---|
 | 키보드 규칙 | 켜기·끄기, Karabiner 와 겹침 안내·끄기, 규칙 목록(체크로 켜고 끄기, 펼치면 조작 요약, JSON 편집·순서·삭제), 규칙 추가(JSON) |
 | 단순 바꾸기 | 키 하나 → 키 하나(Karabiner 의 Simple Modifications). 키 확인 칸에 키를 치면 `key_code` 이름과 키 코드를 보여 준다 |
+| 키보드별 설정 | 연결된 키보드마다 그림, 그 키보드에서만 바꿀 키, 규칙 적용 켜고 끄기 |
 | 키보드 매개변수 | 혼자 누르기 제한 시간, 마우스 키 포인터·휠 속도 |
 
 규칙 파일은 `~/Library/Application Support/Hanmium/keyboard.json` 이다.
@@ -251,7 +256,7 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 
 ![설정 창 — 일반 · 라벨 · 스크롤](docs/images/settings.png)
 
-설정 창은 Karabiner-Elements 처럼 왼쪽 목록에서 화면을 고른다: **일반 · 라벨 · 스크롤**, **키보드 규칙 · 단순 바꾸기 · 키보드 매개변수**(위 [키보드 규칙](#키보드-규칙-karabiner-대신)).
+설정 창은 Karabiner-Elements 처럼 왼쪽 목록에서 화면을 고른다: **일반 · 라벨 · 스크롤**, **키보드 규칙 · 단순 바꾸기 · 키보드별 설정 · 키보드 매개변수**(위 [키보드 규칙](#키보드-규칙-karabiner-대신)).
 
 | 탭 | 구역 | 항목 |
 |---|---|---|
@@ -284,7 +289,7 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 | `Tools/scroll-fixtures.sh` | 웹 스크롤 영역 회귀 테스트. 잘못 잡았던(놓쳤던) 웹 요소를 모은 시험 페이지(`Tools/ScrollFixtures/pages`)를 키 포커스를 가져가지 않는 창에 띄우고, 찾은 영역이 페이지에 적은 기대와 같은지 본다. 새 오인식을 찾으면 페이지를 하나 더 만들고 통과할 때까지 고친다 |
 | `Tools/keyboard-fixtures.sh` | 키보드 규칙 엔진 회귀 테스트. Karabiner 에서 옮겨 온 규칙과 같은 모양(`Tools/KeyboardFixtures/rules.json`)에 키 입력을 차례로 넣고 내보내는 키·클릭·포인터 이동이 맞는지 본다. 실제 키를 보내지 않는다 |
 | `Tools/run-all-tests.sh` | 아래 회귀 테스트를 한 번에 돌리고 결과를 모아 보여 준다. `--live` 를 붙이면 실제 키 시험까지 |
-| `Tools/live-keys.sh` | 키보드 규칙을 실제 키 경로로 시험(35개). 바뀐 키·클릭·휠은 앱에 닿기 전에 버리므로 쓰고 있는 창에는 아무것도 들어가지 않는다 |
+| `Tools/live-keys.sh` | 키보드 규칙을 실제 키 경로로 시험(35개 + 키보드별 설정). 바뀐 키·클릭·휠은 앱에 닿기 전에 버리므로 쓰고 있는 창에는 아무것도 들어가지 않는다. `HANMIUM_TEST_DEVICE=제조사:제품` 이면 시험 키를 그 키보드에서 온 것으로 보낸다 |
 | `Tools/live-latency.sh` | 라벨이 뜨는 시간을 실제 앱·사이트에서 잼(앱마다 앞으로 가져와 라벨 4번). 사이트는 프로필을 따로 쓰는 시험용 Chrome 에서 |
 | `Tools/live-modes.sh` | 시험 창을 띄워 라벨·스크롤 모드를 실제 키로 시험(21개: 라벨에서 j 꾹·k, 영역 번호, 두 모드의 Shift+H/L/J/K, Shift+G·gg, f, 닫기, VS Code 처럼 나뉜 칸). 창 아래 진행 막대에 퍼센트·개수·지금 시험 이름 |
 | `Tools/wezterm-fixtures.sh` | WezTerm 패널 배치 회귀 테스트. 틀렸던 CLI 출력(화면을 옮긴 뒤 남은 픽셀 값 등)과 창 크기를 `Tools/WezTermFixtures/cases` 에 남겨 두고, 계산한 패널 영역이 화면에서 확인한 값과 같은지 본다. 화면·WezTerm 을 건드리지 않는다 |
@@ -315,7 +320,9 @@ Karabiner-Elements 로 하던 키 바꾸기를 Hanmium 이 직접 한다. 설정
 | `KeyboardRules.swift` | 키보드 규칙(Karabiner 형식) 읽기, 키 이름, 저장, Karabiner 가져오기·규칙 끄기 |
 | `KeyboardEngine.swift` | 키 입력 → 내보낼 키·버튼·마우스 키 (시스템을 건드리지 않는 상태 기계) |
 | `KeyboardTap.swift` | 이벤트 탭으로 키를 받아 엔진에 묻고 보내기, 마우스 키(포인터·휠·클릭) |
-| `KeyboardSettings.swift` | 설정 창의 키보드 화면(규칙·단순 바꾸기·매개변수·키 확인) |
+| `KeyboardSettings.swift` | 설정 창의 키보드 화면(규칙·단순 바꾸기·키보드별 설정·매개변수·키 확인) |
+| `KeyboardDevices.swift` | 연결된 키보드 목록, 키보드별 수정키 바꾸기(`hidutil` UserKeyMapping), ISO 배열 알아보기 |
+| `KeyboardLayoutView.swift` | 키보드별 설정의 키보드 그림(Apple·PC 배열, ISO) |
 | `Settings.swift` | 설정 창(SwiftUI, 왼쪽 목록) |
 | `StatusItem.swift` | 메뉴 막대 아이콘과 메뉴 |
 | `Config.swift` | 설정 값, 설정 내보내기·가져오기 |

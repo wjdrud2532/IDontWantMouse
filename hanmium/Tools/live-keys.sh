@@ -5,6 +5,7 @@
 # 실행 중인 Hanmium.app 의 키 바꾸기가 켜져 있어야 한다 (설정 › 키보드 규칙).
 #   Tools/live-keys.sh               35개 전부
 #   Tools/live-keys.sh 포인터 마우스  이름에 그 말이 들어간 항목만
+#   HANMIUM_TEST_DEVICE=1234:ABCD Tools/live-keys.sh   시험 키를 그 키보드(제조사:제품)에서 온 것으로
 set -e
 cd "$(dirname "$0")/.."
 pgrep -xq Hanmium || { echo "Hanmium 이 실행 중이 아님"; exit 2; }

@@ -29,11 +29,25 @@ pub struct A11y {
     pub conn: AccessibilityConnection,
 }
 
-/// 창 기준 좌표를 화면 좌표로 바꿀 때 쓰는 원점. GTK 처럼 그림자를 직접 그리는 창은 버퍼(그림자 포함)와 틀이 다르다.
+/// 창 기준 좌표를 화면 좌표로 바꿀 때 쓰는 원점. 앱마다 다르다: GTK 는 창 틀(그림자 뺀 것), Chrome 은 버퍼(그림자 포함)
+/// 기준으로 준다. Auto 는 앱의 최상위 창이 알려 주는 크기가 틀·버퍼 중 어느 쪽과 같은지 보고 고른다.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Origin {
+    Auto,
     Frame,
     Buffer,
+}
+
+/// 스크롤 영역 하나
+#[derive(Clone, Debug)]
+pub struct Area {
+    pub role: Role,
+    pub name: String,
+    /// 화면 좌표
+    pub rect: Rect,
+    pub object: ObjectRefOwned,
+    /// 창 좌표의 원점(화면 좌표) — 창 좌표로 되돌릴 때
+    pub origin: (f64, f64),
 }
 
 impl A11y {
@@ -59,6 +73,16 @@ impl A11y {
             }
         }
         None
+    }
+
+    /// 앱이 쓰는 툴킷 이름 (AT-SPI Application.ToolkitName: "Chromium", "GTK", "Gecko", "Qt" …)
+    pub async fn toolkit(&self, app: &ObjectRefOwned) -> String {
+        async {
+            let p = app.as_accessible_proxy(self.bus()).await.ok()?;
+            p.proxies().await.ok()?.application().await.ok()?.toolkit_name().await.ok()
+        }
+        .await
+        .unwrap_or_default()
     }
 
     /// 앱의 최상위 창들 중 이 창: 제목이 같은 것, 없으면 활성인 것, 없으면 처음 것
@@ -94,12 +118,31 @@ impl A11y {
         }
     }
 
-    /// 창 안의 클릭 대상 (보이는 것만)
-    pub async fn targets(&self, top: &ObjectRefOwned, window: &Window, origin: Origin) -> (Vec<Target>, usize) {
-        let base = match origin {
+    /// 창 좌표의 원점(화면 좌표). Auto 면 최상위 창이 알려 주는 크기로 고른다.
+    pub async fn base(&self, top: &ObjectRefOwned, window: &Window, origin: Origin) -> Rect {
+        match origin {
             Origin::Frame => window.frame,
             Origin::Buffer => window.buffer,
-        };
+            Origin::Auto => {
+                let size = async {
+                    let p = top.as_accessible_proxy(self.bus()).await.ok()?;
+                    let c = p.proxies().await.ok()?.component().await.ok()?;
+                    c.get_extents(CoordType::Window).await.ok()
+                }
+                .await;
+                match size {
+                    Some((_, _, w, h))
+                        if (w as f64 - window.buffer.w).abs() < 2.0 && (h as f64 - window.buffer.h).abs() < 2.0
+                            && (window.buffer.w - window.frame.w).abs() > 2.0 => window.buffer,
+                    _ => window.frame,
+                }
+            }
+        }
+    }
+
+    /// 창 안의 클릭 대상 (보이는 것만)
+    pub async fn targets(&self, top: &ObjectRefOwned, window: &Window, origin: Origin) -> (Vec<Target>, usize) {
+        let base = self.base(top, window, origin).await;
         let screen = window.frame;
         let mut out = vec![];
         let mut stack = vec![(top.clone(), 0usize)];
@@ -156,6 +199,127 @@ impl A11y {
             object,
             has_action: ifaces.contains(Interface::Action),
         })
+    }
+
+    /// 창 안의 스크롤 영역. 역할(스크롤 창·웹 문서·터미널·뷰포트)이나 웹의 DOM 클래스(맥판과 같은 이름 단서)로 찾는다.
+    /// 거의 같은 자리는 하나만, 다른 영역 안에서 그 70% 넘게 덮는 것은 바깥 것만 남긴다(휠은 가까운 스크롤 상자로 간다).
+    /// 돌려주는 둘째 값은 본 노드 수(막 깨운 Chromium 은 몇 개뿐이다).
+    pub async fn scroll_areas(&self, top: &ObjectRefOwned, window: &Window, origin: Origin) -> (Vec<Area>, usize) {
+        let base = self.base(top, window, origin).await;
+        let screen = window.frame;
+        let mut found: Vec<Area> = vec![];
+        let mut stack = vec![(top.clone(), 0usize)];
+        let mut visited = 0;
+        let started = Instant::now();
+        let area_roles = [Role::ScrollPane, Role::Viewport, Role::DocumentWeb, Role::Terminal];
+        let box_roles = [Role::Section, Role::Landmark, Role::Panel, Role::Grouping, Role::List, Role::Article, Role::Form];
+        let leaf_roles = [Role::Paragraph, Role::Link, Role::Label, Role::Static, Role::Button, Role::Image, Role::Heading,
+                          Role::ListItem, Role::Entry, Role::PushButtonMenu];
+        while let Some((obj, depth)) = stack.pop() {
+            visited += 1;
+            if visited > 5000 || depth > 60 || started.elapsed().as_secs_f64() > 1.5 {
+                break;
+            }
+            let Ok(p) = obj.as_accessible_proxy(self.bus()).await else { continue };
+            let role = p.get_role().await.unwrap_or(Role::Invalid);
+            if leaf_roles.contains(&role) {
+                continue;
+            }
+            if depth > 0 && !p.get_state().await.unwrap_or_default().contains(State::Showing) {
+                continue;
+            }
+            if area_roles.contains(&role) || box_roles.contains(&role) {
+                if let Some(rect) = self.extents(&p, base).await {
+                    let big = rect.w >= 140.0 && rect.h >= 100.0 && rect.intersects(&screen);
+                    let mut scroller = area_roles.contains(&role);
+                    if big && !scroller {
+                        let attrs = p.get_attributes().await.unwrap_or_default();
+                        let names: Vec<&str> = attrs
+                            .get("class")
+                            .map(|c| c.split_whitespace().collect())
+                            .unwrap_or_default();
+                        let mut all = names.clone();
+                        if let Some(id) = attrs.get("id") {
+                            all.push(id.as_str());
+                        }
+                        scroller = hanmium_core::scroll_names::marks_vertical_scroller(&all);
+                    }
+                    if big && scroller {
+                        // 화면(창) 밖으로 나간 부분은 뺀다 — 휠은 보이는 곳에 보내야 한다
+                        let rect = rect.clip(&screen);
+                        found.push(Area { role, name: p.name().await.unwrap_or_default(), rect, object: obj.clone(),
+                                          origin: (base.x, base.y) });
+                    }
+                }
+            }
+            if let Ok(children) = p.get_children().await {
+                for c in children.into_iter().rev() {
+                    stack.push((c, depth + 1));
+                }
+            }
+        }
+        // 거의 같은 자리는 하나만
+        let close = |a: &Rect, b: &Rect| {
+            (a.x - b.x).abs() < 8.0 && (a.y - b.y).abs() < 8.0 && (a.w - b.w).abs() < 8.0 && (a.h - b.h).abs() < 8.0
+        };
+        let mut unique: Vec<Area> = vec![];
+        for a in found {
+            if !unique.iter().any(|u| close(&u.rect, &a.rect)) {
+                unique.push(a);
+            }
+        }
+        let contains = |o: &Rect, i: &Rect| {
+            i.x >= o.x - 4.0 && i.y >= o.y - 4.0 && i.x + i.w <= o.x + o.w + 4.0 && i.y + i.h <= o.y + o.h + 4.0
+        };
+        let all = unique.clone();
+        unique.retain(|inner| {
+            !all.iter().any(|outer| {
+                !close(&outer.rect, &inner.rect) && contains(&outer.rect, &inner.rect)
+                    && inner.rect.w * inner.rect.h >= outer.rect.w * outer.rect.h * 0.7
+            })
+        });
+        unique.sort_by(|a, b| (a.rect.x, a.rect.y).partial_cmp(&(b.rect.x, b.rect.y)).unwrap());
+        (unique, visited)
+    }
+
+    async fn extents(&self, p: &AccessibleProxy<'_>, base: Rect) -> Option<Rect> {
+        let c = p.proxies().await.ok()?.component().await.ok()?;
+        let (x, y, w, h) = c.get_extents(CoordType::Window).await.ok()?;
+        (w > 0 && h > 0).then(|| Rect { x: base.x + x as f64, y: base.y + y as f64, w: w as f64, h: h as f64 })
+    }
+
+    /// 영역이 지금 어디까지 스크롤됐는지 가늠하는 값(시험용, 아래로 갈수록 커짐): 웹은 첫 문단 y 의 음수(px),
+    /// 글 상자는 영역 왼쪽 위 근처 글자의 위치(Text 인터페이스, 영역이나 그 안 세 단계까지).
+    pub async fn scroll_mark(&self, area: &Area) -> Option<i64> {
+        // 웹 영역: 첫 문단의 y 가 스크롤만큼 올라간다 (px)
+        let p = area.object.as_accessible_proxy(self.bus()).await.ok()?;
+        for c in p.get_children().await.unwrap_or_default().into_iter().take(40) {
+            let Ok(cp) = c.as_accessible_proxy(self.bus()).await else { continue };
+            if cp.get_role().await.ok() == Some(Role::Paragraph) {
+                let (_, y, _, _) = cp.proxies().await.ok()?.component().await.ok()?.get_extents(CoordType::Window).await.ok()?;
+                return Some(-(y as i64));
+            }
+        }
+        // 글 상자(GTK 등): 영역 왼쪽 위 근처 글자의 위치
+        let (x, y) = (area.rect.x - area.origin.0 + 12.0, area.rect.y - area.origin.1 + 12.0);
+        let mut queue = std::collections::VecDeque::from([(area.object.clone(), 0)]);
+        while let Some((obj, depth)) = queue.pop_front() {
+            let p = obj.as_accessible_proxy(self.bus()).await.ok()?;
+            if p.get_interfaces().await.unwrap_or_default().contains(Interface::Text) {
+                let text = p.proxies().await.ok()?.text().await.ok()?;
+                if let Ok(offset) = text.get_offset_at_point(x as i32, y as i32, CoordType::Window).await {
+                    if offset >= 0 {
+                        return Some(offset as i64);
+                    }
+                }
+            }
+            if depth < 3 {
+                for c in p.get_children().await.unwrap_or_default() {
+                    queue.push_back((c, depth + 1));
+                }
+            }
+        }
+        None
     }
 
     /// 대상의 첫 동작(누르기·켜기)을 실행한다. 동작이 없으면 false.

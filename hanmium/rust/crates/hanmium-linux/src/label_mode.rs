@@ -12,6 +12,10 @@ pub type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub enum Step {
     Continue,
     Done,
+    /// j·k: 스크롤 모드로 넘어가며 그 키를 누른 채로 (evdev 코드)
+    ToScroll(u16),
+    /// Shift+h·l·j·k: 앱에 보낼 단축키 (스크롤 모드와 같음, scroll_mode::shift_action)
+    Send(Vec<(u16, bool)>),
 }
 
 pub struct LabelMode {
@@ -86,9 +90,23 @@ impl LabelMode {
         let code = info["keycode"].as_u64().unwrap_or(0).saturating_sub(8) as u16;
         // 모드 중에 라벨 단축키(Alt+Space)를 다시 누르면 닫는다 — 잡은 동안은 단축키가 확장 키 바인딩으로 가지 않는다
         let alt = info["state"].as_u64().unwrap_or(0) & (1 << 3) != 0;
+        let ctrl = info["state"].as_u64().unwrap_or(0) & 4 != 0;
+        let shift = info["state"].as_u64().unwrap_or(0) & 1 != 0;
+        let name = evdev_keys::key(code).map(|k| k.name()).unwrap_or("");
+        if shift && !alt && !ctrl && self.typed.is_empty() {
+            if let Some(keys) = crate::scroll_mode::shift_action(name) {
+                return Ok(Step::Send(keys));
+            }
+        }
         match evdev_keys::key(code).map(|k| k.name()) {
             Some("escape") => return self.close(shell).await,
             Some("spacebar") if alt => return self.close(shell).await,
+            // 라벨에서 j·k: 스크롤 모드로 (라벨 글자로 쓰지 않는다)
+            Some("j") | Some("k") if !alt && !ctrl && self.typed.is_empty() => {
+                // 테두리만 지우고 키보드는 계속 잡아 둔다 (j 를 뗀 것이 스크롤 모드로 와야 스크롤이 멈춘다)
+                shell.show_overlay("{}").await?;
+                return Ok(Step::ToScroll(code));
+            }
             Some("delete_or_backspace") => {
                 self.typed.pop();
             }

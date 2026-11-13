@@ -1,6 +1,12 @@
 import CoreGraphics
 import Foundation
 
+/// 키 입력이 온 키보드 (조건 device_if·device_unless 에 쓴다)
+struct KeyEventSource: Equatable {
+    var identity: KeyboardIdentity
+    var builtIn: Bool
+}
+
 /// 키 입력 하나를 받아 무엇을 내보낼지 정한다(KeyboardTap 이 실제로 보낸다). 시스템을 건드리지 않아서 따로 시험할 수 있다
 /// (Tools/KeyboardFixtures). Karabiner-Elements 의 basic 조작과 같은 순서·뜻으로 동작한다:
 /// - 규칙을 위에서부터, 조작을 위에서부터 보고 처음 맞는 것 하나만 쓴다. 맞는 것이 없으면 단순 바꾸기, 그것도 없으면 그대로.
@@ -23,6 +29,9 @@ final class KeyboardEngine {
     struct Rules {
         var manipulators: [KeyManipulator] = []
         var simple: [UInt16: UInt16] = [:]
+        /// 키보드별 단순 바꾸기(수정키가 끼지 않은 것): 키 코드 → 키 코드. 규칙보다 먼저 바꾼다(Karabiner 와 같은 순서).
+        /// 키 코드로 바꾸므로 ISO 키보드의 §·` 처럼 macOS 가 키 코드를 맞바꾸는 키도 화면에 보이는 이름 그대로 맞는다.
+        var deviceKeys: [KeyboardIdentity: [UInt16: UInt16]] = [:]
         var aloneTimeout: Double = 1.0
     }
 
@@ -52,6 +61,8 @@ final class KeyboardEngine {
     private var active: [UInt16: Active] = [:]
     private var nextMotion = 1
     private var lastFlags: CGEventFlags = []
+    /// 지금 맞춰 보는 키를 누른 키보드(모르면 nil: device_if 는 안 맞고 device_unless 는 맞는다)
+    private var device: KeyEventSource?
 
     func reset() {
         active.removeAll()
@@ -63,18 +74,23 @@ final class KeyboardEngine {
         for code in active.keys { active[code]?.interrupted = true }
     }
 
-    func keyDown(_ code: UInt16, flags: CGEventFlags, isRepeat: Bool, time: Double) -> [Output] {
-        if isRepeat || active[code] != nil { return repeatKey(code) }
+    /// physical: 실제로 누른 키. 키보드별 바꾸기를 거친 키로 규칙을 맞추고, 누른 상태는 실제 키로 기억한다(뗄 때 같은 키로 온다).
+    func keyDown(_ physical: UInt16, flags: CGEventFlags, isRepeat: Bool, time: Double,
+                 device: KeyEventSource? = nil) -> [Output] {
+        if isRepeat || active[physical] != nil { return repeatKey(physical) }
         interrupt()
+        self.device = device
+        let code = device.flatMap { rules.deviceKeys[$0.identity]?[physical] } ?? physical
         for m in rules.manipulators {
             guard let strip = match(m, code: code, flags: flags) else { continue }
-            return apply(m, code: code, flags: flags, strip: strip, time: time)
+            return apply(m, code: code, key: physical, flags: flags, strip: strip, time: time)
         }
-        if let to = rules.simple[code] {
-            active[code] = Active(simpleTo: to)
+        // 규칙에 안 걸렸다: 키보드별로 바꾼 키면 그 키, 아니면 전체 단순 바꾸기
+        if let to = code != physical ? code : rules.simple[code] {
+            active[physical] = Active(simpleTo: to)
             return [.key(to, down: true, flags: Self.outputFlags(flags, strip: [], adding: [], for: to), isRepeat: false)]
         }
-        active[code] = Active(passthrough: true)
+        active[physical] = Active(passthrough: true)
         return [.pass]
     }
 
@@ -136,6 +152,9 @@ final class KeyboardEngine {
                 id.range(of: pattern, options: .regularExpression) != nil
             }
             return c.type == "frontmost_application_if" ? hit : !hit
+        case "device_if", "device_unless":
+            let hit = device.map { d in (c.identifiers ?? []).contains { $0.matches(d) } } ?? false
+            return c.type == "device_if" ? hit : !hit
         default:
             return false
         }
@@ -242,7 +261,7 @@ final class KeyboardEngine {
 
     // MARK: 내보내기
 
-    private func apply(_ m: KeyManipulator, code: UInt16, flags: CGEventFlags, strip: CGEventFlags,
+    private func apply(_ m: KeyManipulator, code: UInt16, key: UInt16, flags: CGEventFlags, strip: CGEventFlags,
                        time: Double) -> [Output] {
         var a = Active(strip: strip)
         a.aloneTimeout = (m.parameters[KeyParameters.aloneKey] ?? rules.aloneTimeout * 1000) / 1000
@@ -273,7 +292,7 @@ final class KeyboardEngine {
             a.alone = alone
             a.aloneStart = time
         }
-        active[code] = a
+        active[key] = a
         return out
     }
 
@@ -307,6 +326,8 @@ extension KeyManipulator {
             case "variable_unless": "\(c.name ?? "?") ≠ \(c.value?.description ?? "0")"
             case "frontmost_application_if": "앱: " + (c.bundleIdentifiers ?? []).joined(separator: ", ")
             case "frontmost_application_unless": "앱 아님: " + (c.bundleIdentifiers ?? []).joined(separator: ", ")
+            case "device_if": "키보드: " + Self.describe(c.identifiers ?? [])
+            case "device_unless": "키보드 아님: " + Self.describe(c.identifiers ?? [])
             default: c.type
             }
         }
@@ -341,6 +362,14 @@ extension KeyManipulator {
                 return ["labels": "Hanmium 라벨", "search": "Hanmium 검색", "scroll": "Hanmium 스크롤"][h] ?? h
             }
             return e.unsupported.first ?? "?"
+        }.joined(separator: ", ")
+    }
+
+    static func describe(_ ids: [DeviceIdentifier]) -> String {
+        ids.map { d in
+            if d.isBuiltInKeyboard == true { return "내장" }
+            guard let v = d.vendorID, let p = d.productID else { return "?" }
+            return KeyboardDevices.name(for: KeyboardIdentity(vendorID: v, productID: p))
         }.joined(separator: ", ")
     }
 

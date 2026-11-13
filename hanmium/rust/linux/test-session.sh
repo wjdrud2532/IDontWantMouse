@@ -6,6 +6,7 @@
 #   test-session.sh call METHOD [ARGS…]   확장의 org.hanmium.Shell 메서드 부르기 (gdbus)
 #   test-session.sh shot PNG      화면 찍기
 #   test-session.sh chrome URL     시험용 Chrome (프로필 따로, 키링 창이 뜨지 않게 --password-store=basic)
+#   test-session.sh kill NAME      시험 세션에서 띄운 프로세스(환경 XDG_RUNTIME_DIR 가 시험 세션 것) 중 이름이 NAME 인 것만 끈다
 #   test-session.sh stop
 set -e
 DIR=${HANMIUM_TEST_DIR:-/tmp/hanmium-gnome}
@@ -19,7 +20,21 @@ envs() {
     export DBUS_SESSION_BUS_ADDRESS=$(cat $DIR/bus 2>/dev/null)
 }
 
+# 시험 세션용으로 띄운 프로세스 (환경의 XDG_RUNTIME_DIR 로 가린다 — 사용자 세션 프로세스는 절대 고르지 않는다)
+test_pids() {
+    for d in /proc/[0-9]*; do
+        [ -O "$d" ] || continue
+        if tr '\0' '\n' 2>/dev/null < $d/environ | grep -qx "XDG_RUNTIME_DIR=$DIR/runtime"; then
+            if [ -z "$1" ] || [ "$(cat $d/comm 2>/dev/null)" = "$1" ]; then echo ${d#/proc/}; fi
+        fi
+    done
+}
+
 case "$1" in
+kill)
+    pids=$(test_pids "$2")
+    [ -n "$pids" ] && kill $pids && echo "끔: $2 ($pids)" || echo "없음: $2"
+    ;;
 start)
     "$0" stop >/dev/null 2>&1 || true
     size=${2:-1600x1000}
@@ -30,7 +45,7 @@ start)
     # 데몬 D-Bus 활성화(세션 버스는 $XDG_DATA_HOME/dbus-1/services 를 본다). 데몬 출력은 $DIR/daemon.log
     mkdir -p $DIR/data/dbus-1/services
     bin="$(cd "$(dirname "$0")/.." && pwd)/target/debug/hanmium"
-    printf '[D-BUS Service]\nName=org.hanmium.Daemon\nExec=/bin/sh -c "exec %s run >>%s/daemon.log 2>&1"\n' "$bin" "$DIR" \
+    printf '[D-BUS Service]\nName=org.hanmium.Daemon\nExec=/bin/sh -c "HANMIUM_DEBUG=1 exec %s run >>%s/daemon.log 2>&1"\n' "$bin" "$DIR" \
         > $DIR/data/dbus-1/services/org.hanmium.Daemon.service
     # 세션이 띄우는 것(D-Bus, 접근성 버스, 포털, gvfs 등)을 모두 systemd 범위 하나에 넣어 stop 때 한꺼번에 끈다
     uid=$(id -u)
@@ -75,6 +90,8 @@ shot)
         --method org.hanmium.Shell.Screenshot "$2" >/dev/null && echo "$2"
     ;;
 stop)
+    # run 으로 띄운 앱(범위 밖)도 끈다
+    pids=$(test_pids); [ -n "$pids" ] && kill $pids 2>/dev/null
     uid=$(id -u)
     XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
         systemctl --user stop $UNIT.scope 2>/dev/null || true

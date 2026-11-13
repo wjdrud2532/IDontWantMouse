@@ -46,3 +46,8 @@ pub fn char_of(code: u16) -> Option<char> {
         },
     }
 }
+
+/// 수정키(Shift·Ctrl·Alt·Super, 왼쪽·오른쪽)
+pub fn is_modifier(code: u16) -> bool {
+    matches!(code, 29 | 42 | 54 | 56 | 97 | 100 | 125 | 126)
+}

@@ -7,6 +7,7 @@
 //! - [`modsync`]: 이벤트마다 수정키 플래그를 붙일 수 없는 운영체제(리눅스·윈도우)에서 수정키를 실제로 눌렀다 떼서 맞추기.
 //! - [`mousekeys`]: mouse_key(포인터·휠)를 누르고 있는 동안 얼마나 옮길지.
 //! - [`labels`]: Vimium 방식 라벨 글자.
+//! - [`scroll_names`]: 웹 DOM 클래스 이름으로 스크롤 상자 알아보기.
 
 pub mod engine;
 pub mod keys;
@@ -14,6 +15,7 @@ pub mod labels;
 pub mod modsync;
 pub mod mousekeys;
 pub mod rules;
+pub mod scroll_names;
 
 pub use engine::{Engine, Output};
 pub use keys::{Key, Mods};
