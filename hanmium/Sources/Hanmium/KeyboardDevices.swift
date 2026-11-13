@@ -94,14 +94,18 @@ struct ConnectedKeyboard: Identifiable, Equatable {
 
 /// 연결된 키보드 목록과 키보드별 단순 바꾸기(UserKeyMapping). 메인 스레드에서 쓴다. 서비스 ID → 키보드 표는 키 탭 스레드에서도
 /// 읽으므로 잠금을 둔다.
+///
+/// 키보드는 IOKit 레지스트리에서 그때그때 읽는다. 처음에는 IOHIDEventSystemClient 의 서비스 목록을 썼는데, 그 목록은 만들 때 것에서
+/// 바뀌지 않았다. 블루투스 키보드는 다시 연결될 때마다 서비스 ID 가 바뀌어서(하루에 몇 번씩), 다시 연결된 키보드의 키를 모르는
+/// 키보드로 보고 키보드별 바꾸기를 건너뛰었다(2026-11-13, ISO 키보드의 § + ⌃h 화면 전환이 안 됨).
 final class KeyboardDevices: ObservableObject {
     static let shared = KeyboardDevices()
 
     @Published private(set) var connected: [ConnectedKeyboard] = []
 
-    private let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
     private let lock = NSLock()
-    private var byService: [UInt64: KeyEventSource] = [:]
+    /// 서비스 ID → 키보드 (nil 이면 키보드가 아닌 것으로 알아본 것)
+    private var byService: [UInt64: KeyEventSource?] = [:]
     private var notifyPort: IONotificationPortRef?
     private var iterators: [io_iterator_t] = []
     private var pending: DispatchWorkItem?
@@ -119,11 +123,25 @@ final class KeyboardDevices: ObservableObject {
         watch()
     }
 
-    /// 키 이벤트의 서비스 ID 가 어느 키보드인지 (키 탭 스레드)
+    /// 키 이벤트의 서비스 ID 가 어느 키보드인지 (키 탭 스레드). 처음 보는 ID 면 레지스트리에서 바로 알아본다(0.1ms 안쪽):
+    /// 다시 연결된 키보드의 첫 키가 목록을 다시 읽기 전에 와도 맞게.
     func source(service: UInt64) -> KeyEventSource? {
+        guard service != 0 else { return nil }
         lock.lock()
-        defer { lock.unlock() }
-        return byService[service]
+        if let known = byService[service] {
+            lock.unlock()
+            return known
+        }
+        lock.unlock()
+        let entry = IOServiceGetMatchingService(kIOMainPortDefault, IORegistryEntryIDMatching(service))
+        let found = entry == 0 ? nil : Self.describe(entry, id: service)
+        if entry != 0 { IOObjectRelease(entry) }
+        let source = found.map { KeyEventSource(identity: $0.identity, builtIn: $0.builtIn) }
+        lock.lock()
+        if byService.count > 512 { byService.removeAll() }
+        byService[service] = source
+        lock.unlock()
+        return source
     }
 
     /// 화면에 보일 이름: 연결된 것, 저장한 설정, 그것도 없으면 번호
@@ -136,37 +154,62 @@ final class KeyboardDevices: ObservableObject {
     func refresh() {
         var found: [KeyboardIdentity: (name: String, builtIn: Bool, services: [UInt64])] = [:]
         var order: [KeyboardIdentity] = []
-        for s in services() {
-            let v = Self.int(s, kIOHIDVendorIDKey), p = Self.int(s, kIOHIDProductIDKey)
-            guard v != 0 || p != 0 else { continue }
-            let name = IOHIDServiceClientCopyProperty(s, kIOHIDProductKey as CFString) as? String ?? "키보드"
-            // Karabiner 가상 키보드 같은 소프트웨어 장치는 뺀다
-            if name.localizedCaseInsensitiveContains("Karabiner") { continue }
-            let id = KeyboardIdentity(vendorID: v, productID: p)
-            let builtIn = IOHIDServiceClientCopyProperty(s, "Built-In" as CFString) as? Bool ?? false
-            let service = (IOHIDServiceClientGetRegistryID(s) as? NSNumber)?.uint64Value ?? 0
-            if found[id] == nil { order.append(id) }
-            found[id, default: (name, builtIn, [])].services.append(service)
+        for s in Self.keyboardServices() {
+            if found[s.identity] == nil { order.append(s.identity) }
+            found[s.identity, default: (s.name, s.builtIn, [])].services.append(s.id)
         }
         let list = order.map { id in
             ConnectedKeyboard(identity: id, name: found[id]!.name, builtIn: found[id]!.builtIn,
                               iso: found[id]!.services.contains(where: Self.isISO), services: found[id]!.services)
         }.sorted { ($0.builtIn ? 0 : 1, $0.name) < ($1.builtIn ? 0 : 1, $1.name) }
         lock.lock()
-        byService = Dictionary(list.flatMap { k in k.services.map { ($0, KeyEventSource(identity: k.identity, builtIn: k.builtIn)) } },
+        byService = Dictionary(list.flatMap { k in k.services.map { ($0, Optional(KeyEventSource(identity: k.identity, builtIn: k.builtIn))) } },
                                uniquingKeysWith: { a, _ in a })
         lock.unlock()
         if list != connected { connected = list }
     }
 
-    /// 키보드 HID 서비스들(Generic Desktop · Keyboard)
-    private func services() -> [IOHIDServiceClient] {
-        let all = IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient] ?? []
-        return all.filter { IOHIDServiceClientConformsTo($0, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0 }
+    /// 레지스트리의 키보드 HID 서비스 하나
+    struct Service {
+        let id: UInt64
+        let identity: KeyboardIdentity
+        let name: String
+        let builtIn: Bool
     }
 
-    private static func int(_ s: IOHIDServiceClient, _ key: String) -> Int {
-        (IOHIDServiceClientCopyProperty(s, key as CFString) as? NSNumber)?.intValue ?? 0
+    /// 지금 연결된 키보드 HID 서비스들(Generic Desktop · Keyboard)
+    static func keyboardServices() -> [Service] {
+        var it: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDEventService"), &it) == KERN_SUCCESS
+        else { return [] }
+        defer { IOObjectRelease(it) }
+        var out: [Service] = []
+        while case let s = IOIteratorNext(it), s != 0 {
+            var id: UInt64 = 0
+            IORegistryEntryGetRegistryEntryID(s, &id)
+            if let k = describe(s, id: id) { out.append(k) }
+            IOObjectRelease(s)
+        }
+        return out
+    }
+
+    /// 키보드 서비스면 무엇인지, 아니면 nil
+    static func describe(_ s: io_service_t, id: UInt64) -> Service? {
+        func prop(_ key: String, parents: Bool = false) -> Any? {
+            parents ? IORegistryEntrySearchCFProperty(s, kIOServicePlane, key as CFString, nil,
+                                                      IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents))
+                : IORegistryEntryCreateCFProperty(s, key as CFString, nil, 0)?.takeRetainedValue()
+        }
+        guard (prop(kIOHIDPrimaryUsagePageKey) as? NSNumber)?.intValue == kHIDPage_GenericDesktop,
+              (prop(kIOHIDPrimaryUsageKey) as? NSNumber)?.intValue == kHIDUsage_GD_Keyboard else { return nil }
+        let v = (prop(kIOHIDVendorIDKey, parents: true) as? NSNumber)?.intValue ?? 0
+        let p = (prop(kIOHIDProductIDKey, parents: true) as? NSNumber)?.intValue ?? 0
+        guard v != 0 || p != 0 else { return nil }
+        let name = prop(kIOHIDProductKey, parents: true) as? String ?? "키보드"
+        // Karabiner 가상 키보드 같은 소프트웨어 장치는 뺀다
+        if name.localizedCaseInsensitiveContains("Karabiner") { return nil }
+        let builtIn = (prop("Built-In", parents: true) as? NSNumber)?.boolValue ?? false
+        return Service(id: id, identity: KeyboardIdentity(vendorID: v, productID: p), name: name, builtIn: builtIn)
     }
 
     // MARK: 단순 바꾸기 걸기
@@ -184,11 +227,11 @@ final class KeyboardDevices: ObservableObject {
         var after = before
         var jobs: [(id: KeyboardIdentity, name: String, mapping: [[String: Any]], count: Int)] = []
         var seen = Set<KeyboardIdentity>()
-        for s in services() {
-            let id = KeyboardIdentity(vendorID: Self.int(s, kIOHIDVendorIDKey), productID: Self.int(s, kIOHIDProductIDKey))
+        for s in Self.keyboardServices() {
+            let id = s.identity
             guard seen.insert(id).inserted else { continue }
             let key = "\(id.vendorID):\(id.productID)"
-            let service = (IOHIDServiceClientGetRegistryID(s) as? NSNumber)?.uint64Value ?? 0
+            let service = s.id
             let mine = enabled ? settings.first { $0.identity == id && !$0.ignore }?.hidPairs ?? [] : []
             let pairs = Self.pairs(mine, iso: Self.isISO(service: service))
             // 떨어져 있는 키보드는 after 에 남아 다시 붙을 때 걷힌다
@@ -197,10 +240,7 @@ final class KeyboardDevices: ObservableObject {
             // 같은 키를 Hanmium 이 바꾸면 전체 바꾸기보다 Hanmium 것
             let sources = Set(pairs.map { ($0[Self.srcKey] as? NSNumber)?.uint64Value ?? 0 })
             let merged = base.filter { !sources.contains(($0[Self.srcKey] as? NSNumber)?.uint64Value ?? 0) } + pairs
-            if !Self.same(Self.driverMapping(service: service), merged) {
-                let name = IOHIDServiceClientCopyProperty(s, kIOHIDProductKey as CFString) as? String ?? "?"
-                jobs.append((id, name, merged, pairs.count))
-            }
+            if !Self.same(Self.driverMapping(service: service), merged) { jobs.append((id, s.name, merged, pairs.count)) }
         }
         if after != before { touched = after }
         guard !jobs.isEmpty else { return }
@@ -249,7 +289,8 @@ final class KeyboardDevices: ObservableObject {
 
     /// hidutil property --set 으로 건 전체 바꾸기(키보드마다 따로 건 것이 아님)
     private func baseMapping() -> [[String: Any]] {
-        IOHIDEventSystemClientCopyProperty(client, Self.mappingKey as CFString) as? [[String: Any]] ?? []
+        let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
+        return IOHIDEventSystemClientCopyProperty(client, Self.mappingKey as CFString) as? [[String: Any]] ?? []
     }
 
     /// macOS 가 ISO 배열로 보는 키보드인지(그러면 §·` 의 키 코드와 HID 값이 맞바뀐다). 이벤트의 키보드 종류와 같은 값이

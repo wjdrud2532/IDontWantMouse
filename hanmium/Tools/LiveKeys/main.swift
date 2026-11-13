@@ -318,6 +318,9 @@ if let sectionDevice {
         expect(["*↓50", "*↑50"]))
     add("키보드별 § → ₩: § + h j → ← ↓", { testDevice = sectionDevice; key(SECTION, true); wait(0.05); tap(H); tap(J)
         key(SECTION, false); testDevice = defaultDevice }, expect(["*↓123", "*↑123", "*↓125", "*↑125"]))
+    add("키보드별 § → ₩: § + ⌃h ⌃l → ⌃← ⌃→ (화면 전환)", { testDevice = sectionDevice; key(SECTION, true); wait(0.05)
+        mod(LCTRLK, LCTRL); tap(H, LCTRL); tap(L, LCTRL); mod(LCTRLK, NONE); key(SECTION, false); testDevice = defaultDevice },
+        expect(["*↓123⌃", "*↑123⌃", "*↓124⌃", "*↑124⌃"]))
 }
 if let plainDevice {
     add("키보드별 설정 없는 키보드: § 그대로", { testDevice = plainDevice; tap(SECTION); testDevice = defaultDevice },
